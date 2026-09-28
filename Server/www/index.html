@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQ排程助手 · 让消息发送按计划自动执行（macOS）</title>
+<style>
+  :root{
+    --bg:#0b0e1c; --bg2:#0f1327; --card:#151a33; --card2:#1a2040;
+    --line:#262c4d; --line2:#333a63;
+    --text:#e8eaf8; --muted:#9aa0c3; --dim:#6d7396;
+    --indigo:#6366f1; --indigo2:#818cf8; --indigo-deep:#4338ca;
+    --green:#34d399; --amber:#fbbf24; --red:#f87171;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--indigo2); text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  /* ---- 导航 ---- */
+  nav{position:sticky;top:0;z-index:50;background:rgba(11,14,28,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+  .logo{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--indigo),#a855f7);font-size:15px}
+  .nav-links{display:flex;gap:26px;font-size:14px;color:var(--muted)}
+  .nav-links a{color:var(--muted)}
+  .nav-links a:hover{color:var(--text)}
+  .nav-cta{background:var(--indigo);color:#fff;padding:8px 16px;border-radius:10px;font-size:14px;font-weight:600}
+  .nav-cta:hover{background:var(--indigo-deep)}
+  /* ---- Hero ---- */
+  .hero{padding:84px 0 64px;background:
+    radial-gradient(600px 300px at 20% 0%,rgba(99,102,241,.18),transparent),
+    radial-gradient(500px 260px at 85% 10%,rgba(168,85,247,.12),transparent)}
+  .hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
+  .badge-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px}
+  .badge{font-size:12.5px;padding:5px 12px;border-radius:999px;border:1px solid var(--line2);color:var(--muted);background:rgba(99,102,241,.08)}
+  .badge b{color:var(--indigo2);font-weight:600}
+  h1{font-size:40px;line-height:1.25;letter-spacing:.5px}
+  h1 .hl{background:linear-gradient(90deg,var(--indigo2),#c084fc);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p.sub{margin:18px 0 30px;color:var(--muted);font-size:16.5px;max-width:520px}
+  .cta-row{display:flex;gap:14px;flex-wrap:wrap}
+  .btn{display:inline-block;padding:12px 24px;border-radius:12px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer}
+  .btn-primary{background:linear-gradient(135deg,var(--indigo),#7c3aed);color:#fff;box-shadow:0 8px 24px rgba(99,102,241,.35)}
+  .btn-primary:hover{filter:brightness(1.1)}
+  .btn-ghost{border-color:var(--line2);color:var(--text)}
+  .btn-ghost:hover{border-color:var(--indigo2)}
+  /* App 模拟窗口 */
+  .mock{background:var(--card);border:1px solid var(--line2);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.5);overflow:hidden}
+  .mock-bar{display:flex;align-items:center;gap:7px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--bg2)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .mock-title{margin-left:8px;font-size:12.5px;color:var(--dim)}
+  .mock-body{padding:16px;display:flex;flex-direction:column;gap:10px}
+  .task{display:flex;align-items:center;gap:12px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .task .t-time{font-variant-numeric:tabular-nums;font-size:13px;color:var(--indigo2);font-weight:600;min-width:44px}
+  .task .t-name{font-size:13.5px;flex:1}
+  .task .t-state{font-size:11.5px;padding:3px 9px;border-radius:999px}
+  .ok{color:var(--green);background:rgba(52,211,153,.1)}
+  .wait{color:var(--amber);background:rgba(251,191,36,.1)}
+  /* ---- 通用 Section ---- */
+  section{padding:72px 0}
+  .sec-head{text-align:center;margin-bottom:44px}
+  .sec-head h2{font-size:28px}
+  .sec-head p{color:var(--muted);margin-top:10px;font-size:15px}
+  .kicker{display:inline-block;font-size:12.5px;color:var(--indigo2);border:1px solid var(--line2);border-radius:999px;padding:4px 14px;margin-bottom:14px;letter-spacing:2px}
+  /* ---- 特性 ---- */
+  .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .feat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px}
+  .feat:hover{border-color:var(--line2);transform:translateY(-2px);transition:.2s}
+  .feat .ico{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px;
+    background:rgba(99,102,241,.14);border:1px solid rgba(99,102,241,.35);margin-bottom:14px}
+  .feat h3{font-size:16.5px;margin-bottom:8px}
+  .feat p{font-size:13.8px;color:var(--muted)}
+  /* ---- 价格 ---- */
+  .price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}
+  .plan{position:relative;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:30px 26px;display:flex;flex-direction:column}
+  .plan.best{border-color:var(--indigo);box-shadow:0 0 0 1px var(--indigo),0 20px 50px rgba(99,102,241,.22)}
+  .plan .tag{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:linear-gradient(90deg,var(--indigo),#a855f7);
+    color:#fff;font-size:12px;padding:4px 14px;border-radius:999px;font-weight:600;white-space:nowrap}
+  .plan h3{font-size:19px}
+  .plan .price{font-size:38px;font-weight:800;margin:14px 0 2px}
+  .plan .price small{font-size:14px;color:var(--muted);font-weight:400}
+  .plan .per{color:var(--dim);font-size:13px;margin-bottom:16px}
+  .plan ul{list-style:none;margin:14px 0 22px;flex:1}
+  .plan li{font-size:13.8px;color:var(--muted);padding:5px 0;display:flex;gap:8px;align-items:flex-start}
+  .plan li::before{content:"✓";color:var(--green);font-weight:700}
+  .plan .btn{text-align:center}
+  .trial-note{text-align:center;color:var(--muted);font-size:14px;margin-top:26px}
+  .trial-note b{color:var(--indigo2)}
+  /* ---- 流程 ---- */
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;position:relative}
+  .step .num{width:30px;height:30px;border-radius:9px;background:rgba(99,102,241,.16);border:1px solid rgba(99,102,241,.4);
+    color:var(--indigo2);font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:14px}
+  .step h3{font-size:15.5px;margin-bottom:6px}
+  .step p{font-size:13.3px;color:var(--muted)}
+  /* ---- FAQ ---- */
+  .faq{max-width:760px;margin:0 auto}
+  .qa{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-bottom:12px}
+  .qa h3{font-size:15px;margin-bottom:6px}
+  .qa p{font-size:13.8px;color:var(--muted)}
+  /* ---- 免责声明 ---- */
+  .disclaim{background:var(--bg2);border:1px solid var(--line);border-radius:18px;padding:30px 34px}
+  .disclaim h2{font-size:20px;margin-bottom:14px;display:flex;align-items:center;gap:10px}
+  .disclaim p{font-size:13.8px;color:var(--muted);margin-bottom:10px}
+  .disclaim b{color:var(--text)}
+  /* ---- footer ---- */
+  footer{border-top:1px solid var(--line);padding:34px 0 44px;color:var(--dim);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  @media (max-width:860px){
+    .hero-grid,.feat-grid,.price-grid{grid-template-columns:1fr}
+    .steps{grid-template-columns:repeat(2,1fr)}
+    h1{font-size:31px}
+    .nav-links{display:none}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-inner">
+    <div class="brand"><span class="logo">📅</span>QQ排程助手</div>
+    <div class="nav-links">
+      <a href="#features">功能特性</a>
+      <a href="#pricing">价格</a>
+      <a href="#buy">购买与兑换</a>
+      <a href="#faq">常见问题</a>
+    </div>
+    <a class="nav-cta" href="#pricing">免费试用 3 天</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <div class="badge-row">
+        <span class="badge">macOS 原生应用</span>
+        <span class="badge"><b>新用户注册即送 3 天试用</b></span>
+        <span class="badge">本机自动化 · 数据留本机</span>
+      </div>
+      <h1>QQ 消息排程，<br>交给<span class="hl">计划</span>自动执行</h1>
+      <p class="sub">QQ排程助手让你把定时消息、例行提醒、批量任务统一编排：到点自动执行，无需盯守。所有自动化都在你自己的 Mac 上完成，聊天数据永不离开本机。</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#buy">立即购买开通</a>
+        <a class="btn btn-ghost" href="#pricing">查看价格</a>
+      </div>
+    </div>
+    <div class="mock">
+      <div class="mock-bar">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="mock-title">QQ排程助手 — 今日排程</span>
+      </div>
+      <div class="mock-body">
+        <div class="task"><span class="t-time">09:00</span><span class="t-name">工作群 · 早报定时发送</span><span class="t-state ok">已执行</span></div>
+        <div class="task"><span class="t-time">12:30</span><span class="t-name">项目群 · 午间进度提醒</span><span class="t-state ok">已执行</span></div>
+        <div class="task"><span class="t-time">18:00</span><span class="t-name">家人群 · 晚安打卡</span><span class="t-state wait">等待中</span></div>
+        <div class="task"><span class="t-time">21:30</span><span class="t-name">日报汇总 · 每日例行</span><span class="t-state wait">等待中</span></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">FEATURES</span>
+      <h2>为「按计划发送」而生的工具</h2>
+      <p>把重复的消息任务交给排程，时间留给你自己</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat"><div class="ico">⏰</div><h3>精确定时发送</h3><p>任务精确到分钟，到点自动执行；错过的时间点自动顺延，不漏发。</p></div>
+      <div class="feat"><div class="ico">🗂</div><h3>批量任务管理</h3><p>多条排程任务按日历统一管理，支持每日 / 每周 / 指定日期重复。</p></div>
+      <div class="feat"><div class="ico">🔔</div><h3>例行提醒</h3><p>早晚打卡、周期汇报等例行消息一次配置，长期生效。</p></div>
+      <div class="feat"><div class="ico">🔒</div><h3>本机自动化</h3><p>自动化全部在本机执行，不上传、不存储任何聊天内容，隐私由你掌控。</p></div>
+      <div class="feat"><div class="ico">🌙</div><h3>后台静默运行</h3><p>常驻后台安静执行任务，占用极低，不打扰你的正常使用。</p></div>
+      <div class="feat"><div class="ico">💳</div><h3>卡密即买即用</h3><p>购买卡密后在 App 内一键兑换，时长自动叠加，到期前 App 内提醒续费。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">PRICING</span>
+      <h2>简单透明的会员价格</h2>
+      <p>按卡密兑换开通，时长自动累计叠加，无自动扣费</p>
+    </div>
+    <div class="price-grid" id="planCards">
+      <!-- 价格兜底：页面加载后会从 /api/plans 拉取最新配置覆盖 -->
+      <div class="plan">
+        <h3>月卡</h3>
+        <div class="price">¥9.9<small> / 30天</small></div>
+        <div class="per">当前优惠价 · 约 ¥0.33 / 天</div>
+        <ul><li>全部排程功能</li><li>任务数量不限</li><li>时长 30 天</li></ul>
+        <a class="btn btn-ghost" href="#buy">购买卡密</a>
+      </div>
+      <div class="plan best">
+        <div class="tag">多数人的选择</div>
+        <h3>季卡</h3>
+        <div class="price">¥26.9<small> / 90天</small></div>
+        <div class="per">折合约 ¥8.97 / 月</div>
+        <ul><li>全部排程功能</li><li>任务数量不限</li><li>时长 90 天</li></ul>
+        <a class="btn btn-primary" href="#buy">购买卡密</a>
+      </div>
+      <div class="plan">
+        <h3>年卡</h3>
+        <div class="price">¥99<small> / 365天</small></div>
+        <div class="per">折合 ¥8.25 / 月 · 最划算</div>
+        <ul><li>全部排程功能</li><li>任务数量不限</li><li>时长 365 天</li></ul>
+        <a class="btn btn-ghost" href="#buy">购买卡密</a>
+      </div>
+    </div>
+    <p class="trial-note">🎁 新用户注册即送 <b>3 天</b>全功能试用，无需绑卡；试用到期后再决定是否开通。</p>
+  </div>
+</section>
+
+<section id="buy">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="kicker">HOW TO BUY</span>
+      <h2>购买与兑换流程</h2>
+      <p>卡密兑换制：付款后获得卡密，App 内兑换立即到账</p>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h3>购买卡密</h3><p>通过官方指定渠道（发卡平台 / 微店 / 人工客服）购买对应档位的卡密。</p></div>
+      <div class="step"><div class="num">2</div><h3>打开 App 兑换</h3><p>登录 QQ排程助手，进入「会员 / 兑换」页面。</p></div>
+      <div class="step"><div class="num">3</div><h3>输入卡密</h3><p>粘贴卡密点击兑换，剩余时长自动向后叠加，立即生效。</p></div>
+      <div class="step"><div class="num">4</div><h3>查看会员</h3><p>在「我的」页面随时查看到期时间与剩余天数，到期前会提醒续费。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="background:var(--bg2)">
+  <div class="wrap faq">
+    <div class="sec-head">
+      <span class="kicker">FAQ</span>
+      <h2>常见问题</h2>
+    </div>
+    <div class="qa"><h3>试用需要付费吗？会自动扣费吗？</h3><p>不需要。注册即送 3 天全功能试用，试用结束后如需继续使用，购买卡密兑换即可。本产品为卡密预付费制，<b>没有任何自动扣费</b>。</p></div>
+    <div class="qa"><h3>在哪里购买卡密？</h3><p>通过官方指定渠道购买：发卡平台自动发货、微店下单，或联系管理员人工发货。付款后即可获得形如 <b>QP-M-XXXX-XXXX</b> 的卡密。</p></div>
+    <div class="qa"><h3>兑换后剩余时长会浪费吗？</h3><p>不会。会员时长采用<b>滑动叠加</b>：新兑换的天数从当前到期时间继续向后累加，剩余时长完整保留。</p></div>
+    <div class="qa"><h3>换电脑或重装后会员还在吗？</h3><p>在。会员时长跟随账号，同一账号在任意 Mac 上登录即可继续使用。</p></div>
+    <div class="qa"><h3>卡密兑换错了档位能换吗？</h3><p>虚拟商品一经兑换不支持退款，兑换前请确认档位；未使用的卡密可联系客服协助处理。</p></div>
+  </div>
+</section>
+
+<section id="disclaim">
+  <div class="wrap">
+    <div class="disclaim">
+      <h2>⚠️ 免责声明</h2>
+      <p><b>本机自动化，数据留本机。</b>QQ排程助手是一款本机自动化效率工具：所有排程与自动操作均在你自己的电脑上完成。服务端仅保存登录账号、会员到期时间等必要信息，<b>不上传、不存储任何聊天记录与消息内容</b>。</p>
+      <p>请合理使用本工具，遵守 QQ 平台用户协议与所在地区法律法规，<b>勿用于骚扰、广告轰炸、批量营销等违规用途</b>。因使用者违规操作导致的账号处罚或其它后果，由使用者自行承担。</p>
+      <p>本软件按「现状」提供，我们会尽力保障可用性，但不承诺因不可抗力、平台策略变化导致的功能失效。</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>© 2026 QQ排程助手 · macOS 排程效率工具</div>
+    <div>购买 / 兑换遇到问题？请联系管理员获取人工帮助</div>
+  </div>
+</footer>
+
+<script>
+/* 从服务端拉取最新档位配置，覆盖兜底价格（拉取失败时保留上方静态内容） */
+(function(){
+  fetch("/api/plans").then(function(r){ return r.json(); }).then(function(list){
+    if(!Array.isArray(list) || !list.length) return;
+    var box = document.getElementById("planCards");
+    box.innerHTML = "";
+    var perks = ["全部排程功能","任务数量不限","时长 {{days}} 天"];
+    list.forEach(function(p, i){
+      var best = /年卡|year/i.test(p.id) || i === list.length - 1;
+      var li = (perks[2].replace("{{days}}", p.days));
+      var card = document.createElement("div");
+      card.className = "plan" + (best ? " best" : "");
+      card.innerHTML =
+        (best ? '<div class="tag">长期使用更划算</div>' : '') +
+        '<h3>' + esc(p.name) + '</h3>' +
+        '<div class="price">' + esc(p.price_display) + '<small> / ' + p.days + '天</small></div>' +
+        '<div class="per">' + esc(p.tagline || "") + '</div>' +
+        '<ul><li>' + perks[0] + '</li><li>' + perks[1] + '</li><li>' + li + '</li></ul>' +
+        '<a class="btn ' + (best ? "btn-primary" : "btn-ghost") + '" href="#buy">购买卡密</a>';
+      box.appendChild(card);
+    });
+  }).catch(function(){ /* 保持静态兜底价格 */ });
+
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+})();
+</script>
+</body>
+</html>

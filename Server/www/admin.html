@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQ排程助手 · 管理后台</title>
+<style>
+  :root{
+    --bg:#0b0e1c; --bg2:#0f1327; --card:#151a33; --card2:#1a2040;
+    --line:#262c4d; --line2:#333a63;
+    --text:#e8eaf8; --muted:#9aa0c3; --dim:#6d7396;
+    --indigo:#6366f1; --indigo2:#818cf8; --indigo-deep:#4338ca;
+    --green:#34d399; --amber:#fbbf24; --red:#f87171;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--text); min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px; -webkit-font-smoothing:antialiased;
+  }
+  .hidden{display:none !important}
+  input,select,textarea,button{font-family:inherit;font-size:14px}
+  input,select,textarea{
+    background:var(--bg2); border:1px solid var(--line2); color:var(--text);
+    border-radius:10px; padding:9px 12px; outline:none;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--indigo)}
+  button{cursor:pointer;border:none;border-radius:10px;font-weight:600}
+  .btn{padding:9px 18px}
+  .btn-primary{background:var(--indigo);color:#fff}
+  .btn-primary:hover{background:var(--indigo-deep)}
+  .btn-ghost{background:transparent;border:1px solid var(--line2);color:var(--text)}
+  .btn-ghost:hover{border-color:var(--indigo2)}
+  .btn-danger{background:rgba(248,113,113,.12);color:var(--red);border:1px solid rgba(248,113,113,.35)}
+  .btn-sm{padding:5px 12px;font-size:12.5px;border-radius:8px}
+  /* ---- 登录 ---- */
+  .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;
+    background:radial-gradient(600px 320px at 50% 20%,rgba(99,102,241,.16),transparent)}
+  .login-card{background:var(--card);border:1px solid var(--line2);border-radius:18px;padding:40px 38px;width:360px;text-align:center}
+  .login-card .logo{width:52px;height:52px;border-radius:14px;margin:0 auto 16px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--indigo),#a855f7);font-size:26px}
+  .login-card h1{font-size:20px;margin-bottom:4px}
+  .login-card .sub{color:var(--dim);font-size:13px;margin-bottom:26px}
+  .login-card input{width:100%;text-align:center;padding:12px;margin-bottom:14px}
+  .login-card .btn{width:100%;padding:12px}
+  .msg{margin-top:14px;font-size:13px;min-height:18px}
+  .msg.err{color:var(--red)} .msg.ok{color:var(--green)}
+  /* ---- 主界面 ---- */
+  header.top{position:sticky;top:0;z-index:20;background:rgba(11,14,28,.9);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);padding:0 24px;height:60px;display:flex;align-items:center;justify-content:space-between}
+  .top .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+  .top .logo{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,var(--indigo),#a855f7);font-size:15px}
+  .top .actions{display:flex;gap:10px;align-items:center}
+  .top .who{color:var(--dim);font-size:12.5px}
+  main{max-width:1180px;margin:0 auto;padding:24px}
+  /* 统计卡 */
+  .stats{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:24px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .stat .label{color:var(--dim);font-size:12px;margin-bottom:6px}
+  .stat .val{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+  .stat .val.indigo{color:var(--indigo2)} .stat .val.green{color:var(--green)} .stat .val.amber{color:var(--amber)}
+  /* 标签页 */
+  .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+  .tab-btn{padding:9px 20px;border-radius:10px;background:var(--card);border:1px solid var(--line);color:var(--muted)}
+  .tab-btn.active{background:rgba(99,102,241,.15);border-color:var(--indigo);color:var(--indigo2)}
+  /* 卡片与表格 */
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px}
+  .panel h3{font-size:15px;margin-bottom:14px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .toolbar input[type=text]{width:220px}
+  .table-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{color:var(--dim);font-weight:500;text-align:left;padding:9px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+  tr:hover td{background:rgba(99,102,241,.05)}
+  .mono{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12.5px;letter-spacing:.5px}
+  .empty{color:var(--dim);text-align:center;padding:26px 0}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px}
+  .b-green{color:var(--green);background:rgba(52,211,153,.1)}
+  .b-red{color:var(--red);background:rgba(248,113,113,.1)}
+  .b-gray{color:var(--dim);background:rgba(109,115,150,.12)}
+  .b-indigo{color:var(--indigo2);background:rgba(99,102,241,.12)}
+  .row-actions{display:flex;gap:6px}
+  /* 生成结果 */
+  .gen-result{margin-top:14px}
+  .gen-result textarea{width:100%;min-height:130px;font-family:"SF Mono",Menlo,monospace;font-size:12.5px;line-height:1.7;resize:vertical}
+  .gen-meta{color:var(--dim);font-size:12.5px;margin:8px 0}
+  /* 弹窗 */
+  .mask{position:fixed;inset:0;background:rgba(4,6,15,.72);display:flex;align-items:center;justify-content:center;z-index:100}
+  .modal{background:var(--card);border:1px solid var(--line2);border-radius:16px;padding:26px;width:400px;max-width:92vw}
+  .modal h3{margin-bottom:6px}
+  .modal .sub{color:var(--dim);font-size:13px;margin-bottom:16px}
+  .modal label{display:block;color:var(--muted);font-size:12.5px;margin:12px 0 6px}
+  .modal input,.modal textarea{width:100%}
+  .modal textarea{min-height:64px;resize:vertical}
+  .modal .foot{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+  /* toast */
+  #toast{position:fixed;right:22px;bottom:22px;background:var(--card2);border:1px solid var(--line2);
+    border-left:3px solid var(--green);padding:12px 18px;border-radius:10px;font-size:13.5px;z-index:200;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);transition:opacity .3s;opacity:0;pointer-events:none}
+  #toast.show{opacity:1}
+  #toast.err{border-left-color:var(--red)}
+  @media (max-width:960px){.stats{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<!-- ============ 登录视图 ============ -->
+<div id="loginView" class="login-wrap">
+  <div class="login-card">
+    <div class="logo">📅</div>
+    <h1>QQ排程助手</h1>
+    <div class="sub">管理后台 · 仅限管理员访问</div>
+    <input type="password" id="pwInput" placeholder="请输入管理密码" autocomplete="current-password">
+    <button class="btn btn-primary" id="btnLogin">登 录</button>
+    <div class="msg" id="loginMsg"></div>
+  </div>
+</div>
+
+<!-- ============ 主视图 ============ -->
+<div id="mainView" class="hidden">
+  <header class="top">
+    <div class="brand"><span class="logo">📅</span>QQ排程助手 · 管理后台</div>
+    <div class="actions">
+      <span class="who" id="whoAmI">管理员</span>
+      <button class="btn btn-ghost btn-sm" id="btnRefresh">刷新</button>
+      <button class="btn btn-danger btn-sm" id="btnLogout">退出登录</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 概览统计 -->
+    <div class="stats" id="statCards">
+      <div class="stat"><div class="label">用户总数</div><div class="val" id="stUsers">-</div></div>
+      <div class="stat"><div class="label">有效会员</div><div class="val green" id="stMembers">-</div></div>
+      <div class="stat"><div class="label">试用中</div><div class="val amber" id="stTrial">-</div></div>
+      <div class="stat"><div class="label">累计兑换收入</div><div class="val indigo" id="stRevenue">-</div></div>
+      <div class="stat"><div class="label">未用卡密</div><div class="val" id="stUnused">-</div></div>
+      <div class="stat"><div class="label">已用卡密</div><div class="val" id="stUsed">-</div></div>
+    </div>
+
+    <!-- 标签页 -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="users">用户管理</button>
+      <button class="tab-btn" data-tab="codes">卡密管理</button>
+      <button class="tab-btn" data-tab="redemptions">兑换记录</button>
+    </div>
+
+    <!-- 用户管理 -->
+    <section id="tab-users">
+      <div class="panel">
+        <div class="toolbar">
+          <input type="text" id="userQuery" placeholder="搜索账号…">
+          <button class="btn btn-ghost btn-sm" id="btnUserSearch">搜索</button>
+          <span style="flex:1"></span>
+          <span class="who" id="userCount"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>ID</th><th>账号</th><th>注册时间</th><th>会员类型</th><th>到期时间</th>
+              <th>剩余天数</th><th>来源</th><th>状态</th><th style="width:170px">操作</th>
+            </tr></thead>
+            <tbody id="userRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 卡密管理 -->
+    <section id="tab-codes" class="hidden">
+      <div class="panel">
+        <h3>批量生成卡密</h3>
+        <div class="toolbar">
+          <select id="genPlan"></select>
+          <input type="number" id="genCount" min="1" max="500" value="10" style="width:110px" title="数量 1-500">
+          <input type="text" id="genNote" placeholder="备注（可选，如：微店批次0901）" style="width:260px">
+          <button class="btn btn-primary btn-sm" id="btnGen">生成</button>
+        </div>
+        <div class="gen-result hidden" id="genResultBox">
+          <div class="gen-meta" id="genMeta"></div>
+          <textarea id="genResult" readonly></textarea>
+          <div class="toolbar" style="margin-top:10px">
+            <button class="btn btn-primary btn-sm" id="btnCopy">复制全部</button>
+            <span class="who">生成后请立即复制保存；卡密一旦泄露他人可抢先兑换</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="toolbar">
+          <select id="codeStatus">
+            <option value="">全部状态</option>
+            <option value="unused">未使用</option>
+            <option value="used">已使用</option>
+          </select>
+          <input type="text" id="codeQuery" placeholder="按卡密搜索…">
+          <button class="btn btn-ghost btn-sm" id="btnCodeSearch">查询</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost btn-sm" id="btnExport">导出 CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>卡密</th><th>档位</th><th>天数</th><th>面值</th><th>状态</th>
+              <th>备注</th><th>生成时间</th><th>使用者</th><th>使用时间</th>
+            </tr></thead>
+            <tbody id="codeRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 兑换记录 -->
+    <section id="tab-redemptions" class="hidden">
+      <div class="panel">
+        <div class="toolbar">
+          <span class="who">最近 1000 条 · 累计收入以概览卡为准</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>时间</th><th>账号</th><th>卡密</th><th>档位</th><th>天数</th><th>金额</th>
+            </tr></thead>
+            <tbody id="redRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 加时长弹窗 -->
+<div class="mask hidden" id="grantMask">
+  <div class="modal">
+    <h3>手动补时长</h3>
+    <div class="sub">客服补单：用户已通过其他渠道付款，直接为其账号叠加会员天数（时长在现有到期时间上顺延）</div>
+    <div style="color:var(--indigo2);font-weight:600" id="grantAccount"></div>
+    <label>增加天数（1-3650）</label>
+    <input type="number" id="grantDays" value="30" min="1" max="3650">
+    <label>备注（订单号 / 退款凭证等）</label>
+    <textarea id="grantNote" placeholder="如：微店订单 20260925xxx"></textarea>
+    <div class="foot">
+      <button class="btn btn-ghost btn-sm" id="btnGrantCancel">取消</button>
+      <button class="btn btn-primary btn-sm" id="btnGrantOk">确认补时长</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ===================== 基础 ===================== */
+var $ = function(id){ return document.getElementById(id); };
+var adminToken = sessionStorage.getItem("qp_admin_token") || "";
+
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+
+function toast(msg, isErr){
+  var t = $("toast");
+  t.textContent = msg;
+  t.className = isErr ? "err show" : "show";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function(){ t.className = isErr ? "err" : ""; }, 2600);
+}
+
+function api(path, opts){
+  opts = opts || {};
+  return fetch(path, {
+    method: opts.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": adminToken ? ("Bearer " + adminToken) : ""
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  }).then(function(res){
+    return res.json().catch(function(){ return {}; }).then(function(data){
+      if(!res.ok){
+        if(res.status === 401 && !opts.skipAuthKick){ kickToLogin(data.error || "登录已过期"); }
+        throw new Error(data.error || ("请求失败（HTTP " + res.status + "）"));
+      }
+      return data;
+    });
+  });
+}
+
+/* ===================== 登录 / 会话 ===================== */
+
+function kickToLogin(reason){
+  adminToken = "";
+  sessionStorage.removeItem("qp_admin_token");
+  $("mainView").classList.add("hidden");
+  $("loginView").classList.remove("hidden");
+  if(reason) showLoginMsg(reason, true);
+}
+
+function showLoginMsg(text, isErr){
+  var m = $("loginMsg");
+  m.textContent = text || "";
+  m.className = "msg " + (isErr ? "err" : "ok");
+}
+
+function doLogin(){
+  var pw = $("pwInput").value.trim();
+  if(!pw){ showLoginMsg("请输入管理密码", true); return; }
+  $("btnLogin").disabled = true;
+  fetch("/api/admin/login", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({password: pw})
+  }).then(function(r){ return r.json(); }).then(function(data){
+    $("btnLogin").disabled = false;
+    if(data.admin_token){
+      adminToken = data.admin_token;
+      sessionStorage.setItem("qp_admin_token", adminToken);
+      showLoginMsg("", false);
+      $("pwInput").value = "";
+      enterMain();
+    } else {
+      showLoginMsg(data.error || "登录失败", true);
+    }
+  }).catch(function(e){
+    $("btnLogin").disabled = false;
+    showLoginMsg("网络错误：" + e.message, true);
+  });
+}
+
+function enterMain(){
+  $("loginView").classList.add("hidden");
+  $("mainView").classList.remove("hidden");
+  loadPlans().then(loadOverview).catch(function(e){ toast(e.message, true); });
+}
+
+/* ===================== 概览 ===================== */
+
+function loadOverview(){
+  return api("/api/admin/overview").then(function(d){
+    $("stUsers").textContent = d.users_total;
+    $("stMembers").textContent = d.valid_members;
+    $("stTrial").textContent = d.trial_users;
+    $("stRevenue").textContent = "¥" + d.revenue_yuan;
+    $("stUnused").textContent = d.codes_unused;
+    $("stUsed").textContent = d.codes_used;
+  });
+}
+
+/* ===================== 档位下拉 ===================== */
+var PLANS = [];
+function loadPlans(){
+  return fetch("/api/plans").then(function(r){ return r.json(); }).then(function(list){
+    PLANS = Array.isArray(list) ? list : [];
+    var sel = $("genPlan");
+    sel.innerHTML = "";
+    PLANS.forEach(function(p){
+      var opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name + "（" + p.days + "天 / " + p.price_display + "）";
+      sel.appendChild(opt);
+    });
+  });
+}
+
+/* ===================== 标签页 ===================== */
+var currentTab = "users";
+document.querySelectorAll(".tab-btn").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    document.querySelectorAll(".tab-btn").forEach(function(b){ b.classList.remove("active"); });
+    btn.classList.add("active");
+    currentTab = btn.getAttribute("data-tab");
+    ["users","codes","redemptions"].forEach(function(t){
+      $("tab-" + t).classList.toggle("hidden", t !== currentTab);
+    });
+    refreshTab();
+  });
+});
+
+function refreshTab(){
+  if(currentTab === "users") loadUsers();
+  else if(currentTab === "codes") loadCodes();
+  else loadRedemptions();
+}
+
+/* ===================== 用户管理 ===================== */
+
+function loadUsers(){
+  var q = $("userQuery").value.trim();
+  var url = "/api/admin/users" + (q ? ("?q=" + encodeURIComponent(q)) : "");
+  api(url).then(function(d){
+    $("userCount").textContent = "共 " + d.total + " 个用户";
+    var tb = $("userRows");
+    tb.innerHTML = "";
+    if(!d.users.length){
+      tb.innerHTML = '<tr><td colspan="9" class="empty">暂无用户</td></tr>';
+      return;
+    }
+    d.users.forEach(function(u){
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td>' + u.id + '</td>' +
+        '<td class="mono">' + esc(u.account) + '</td>' +
+        '<td>' + esc(u.created_at_display) + '</td>' +
+        '<td>' + esc(u.plan_label) + '</td>' +
+        '<td>' + esc(u.paid_until_display) + '</td>' +
+        '<td>' + u.days_left + '</td>' +
+        '<td>' + (u.source === "paid" ? '<span class="badge b-indigo">付费</span>' : '<span class="badge b-gray">试用</span>') + '</td>' +
+        '<td>' + (u.disabled ? '<span class="badge b-red">已禁用</span>' : '<span class="badge b-green">正常</span>') + '</td>' +
+        '<td><div class="row-actions">' +
+          '<button class="btn btn-ghost btn-sm" data-act="grant">加时长</button>' +
+          (u.disabled
+            ? '<button class="btn btn-ghost btn-sm" data-act="enable">启用</button>'
+            : '<button class="btn btn-danger btn-sm" data-act="disable">禁用</button>') +
+        '</div></td>';
+      tr.querySelectorAll("button").forEach(function(b){
+        b.addEventListener("click", function(){
+          var act = b.getAttribute("data-act");
+          if(act === "grant") openGrant(u);
+          else toggleDisable(u, act === "disable");
+        });
+      });
+      tb.appendChild(tr);
+    });
+  }).catch(function(e){ toast(e.message, true); });
+}
+
+function toggleDisable(u, disable){
+  var tip = disable
+    ? "确定禁用账号「" + u.account + "」吗？\n禁用后该账号将无法登录与兑换。"
+    : "确定恢复账号「" + u.account + "」吗？";
+  if(!confirm(tip)) return;
+  api("/api/admin/users/disable", {method:"POST", body:{user_id:u.id, disabled:disable}})
+    .then(function(){
+      toast(disable ? "已禁用 " + u.account : "已启用 " + u.account);
+      loadUsers(); loadOverview();
+    })
+    .catch(function(e){ toast(e.message, true); });
+}
+
+/* 补时长弹窗 */
+var grantUser = null;
+function openGrant(u){
+  grantUser = u;
+  $("grantAccount").textContent = "#" + u.id + " · " + u.account;
+  $("grantDays").value = 30;
+  $("grantNote").value = "";
+  $("grantMask").classList.remove("hidden");
+  $("grantDays").focus();
+}
+$("btnGrantCancel").addEventListener("click", function(){ $("grantMask").classList.add("hidden"); });
+$("grantMask").addEventListener("click", function(e){ if(e.target === this) this.classList.add("hidden"); });
+$("btnGrantOk").addEventListener("click", function(){
+  if(!grantUser) return;
+  var days = parseInt($("grantDays").value, 10);
+  if(!(days >= 1 && days <= 3650)){ toast("天数需在 1-3650 之间", true); return; }
+  api("/api/admin/users/grant", {method:"POST", body:{
+    user_id: grantUser.id, days: days, note: $("grantNote").value.trim()
+  }}).then(function(d){
+    $("grantMask").classList.add("hidden");
+    toast("已为 " + grantUser.account + " 增加 " + days + " 天，新到期时间 " + d.paid_until_display);
+    loadUsers(); loadOverview();
+  }).catch(function(e){ toast(e.message, true); });
+});
+
+/* ===================== 卡密管理 ===================== */
+
+function generateCodes(){
+  var planId = $("genPlan").value;
+  var count = parseInt($("genCount").value, 10);
+  if(!(count >= 1 && count <= 500)){ toast("生成数量需在 1-500 之间", true); return; }
+  $("btnGen").disabled = true;
+  api("/api/admin/codes/generate", {method:"POST", body:{
+    plan_id: planId, count: count, note: $("genNote").value.trim()
+  }}).then(function(d){
+    $("btnGen").disabled = false;
+    $("genResultBox").classList.remove("hidden");
+    $("genMeta").textContent = "已生成 " + d.count + " 张「" + d.plan_name + "」（" + d.days + "天 / " + d.price_display + "），批次 " + d.batch_id;
+    $("genResult").value = d.codes.join("\n");
+    toast("成功生成 " + d.count + " 张卡密");
+    loadCodes(); loadOverview();
+  }).catch(function(e){ $("btnGen").disabled = false; toast(e.message, true); });
+}
+
+function loadCodes(){
+  var status = $("codeStatus").value;
+  var q = $("codeQuery").value.trim();
+  var ps = [];
+  if(status) ps.push("status=" + status);
+  if(q) ps.push("q=" + encodeURIComponent(q));
+  var url = "/api/admin/codes" + (ps.length ? ("?" + ps.join("&")) : "");
+  api(url).then(function(d){
+    var tb = $("codeRows");
+    tb.innerHTML = "";
+    if(!d.codes.length){
+      tb.innerHTML = '<tr><td colspan="9" class="empty">暂无卡密，先在上方生成</td></tr>';
+      return;
+    }
+    d.codes.forEach(function(c){
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td class="mono">' + esc(c.code) + '</td>' +
+        '<td>' + esc(c.plan_name) + '</td>' +
+        '<td>' + c.days + '</td>' +
+        '<td>' + esc(c.price_display) + '</td>' +
+        '<td>' + (c.status === "used"
+          ? '<span class="badge b-gray">已使用</span>'
+          : '<span class="badge b-green">未使用</span>') + '</td>' +
+        '<td>' + esc(c.note || "-") + '</td>' +
+        '<td>' + esc(c.created_at_display) + '</td>' +
+        '<td>' + esc(c.used_by_account || "-") + '</td>' +
+        '<td>' + esc(c.used_at_display || "-") + '</td>';
+      tb.appendChild(tr);
+    });
+  }).catch(function(e){ toast(e.message, true); });
+}
+
+function copyAllCodes(){
+  var text = $("genResult").value;
+  if(!text){ toast("暂无可复制的卡密", true); return; }
+  function fallback(){
+    var ta = $("genResult");
+    ta.focus(); ta.select();
+    try{
+      if(document.execCommand("copy")){ toast("已复制 " + text.split("\n").length + " 张卡密"); }
+      else { toast("复制失败，请手动全选复制", true); }
+    }catch(err){ toast("复制失败，请手动全选复制", true); }
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){
+      toast("已复制 " + text.split("\n").length + " 张卡密");
+    }).catch(fallback);
+  } else { fallback(); }
+}
+
+function exportCsv(){
+  var status = $("codeStatus").value;
+  var q = $("codeQuery").value.trim();
+  var ps = [];
+  if(status) ps.push("status=" + status);
+  if(q) ps.push("q=" + encodeURIComponent(q));
+  var url = "/api/admin/codes/export" + (ps.length ? ("?" + ps.join("&")) : "");
+  fetch(url, {headers:{"Authorization": "Bearer " + adminToken}}).then(function(res){
+    if(!res.ok){ throw new Error("导出失败（HTTP " + res.status + "）"); }
+    return res.blob();
+  }).then(function(blob){
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "codes-" + new Date().toISOString().slice(0,10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 3000);
+    toast("CSV 已导出");
+  }).catch(function(e){ toast(e.message, true); });
+}
+
+/* ===================== 兑换记录 ===================== */
+
+function loadRedemptions(){
+  api("/api/admin/redemptions").then(function(d){
+    var tb = $("redRows");
+    tb.innerHTML = "";
+    if(!d.redemptions.length){
+      tb.innerHTML = '<tr><td colspan="6" class="empty">暂无兑换记录</td></tr>';
+      return;
+    }
+    d.redemptions.forEach(function(r){
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td>' + esc(r.created_at_display) + '</td>' +
+        '<td class="mono">' + esc(r.account) + '</td>' +
+        '<td class="mono">' + esc(r.code) + '</td>' +
+        '<td>' + esc(r.plan_name) + '</td>' +
+        '<td>' + r.days + '</td>' +
+        '<td style="color:var(--green);font-weight:600">' + esc(r.amount_display) + '</td>';
+      tb.appendChild(tr);
+    });
+  }).catch(function(e){ toast(e.message, true); });
+}
+
+/* ===================== 事件绑定 ===================== */
+
+$("btnLogin").addEventListener("click", doLogin);
+$("pwInput").addEventListener("keydown", function(e){ if(e.key === "Enter") doLogin(); });
+$("btnLogout").addEventListener("click", function(){ kickToLogin(""); });
+$("btnRefresh").addEventListener("click", function(){
+  loadOverview(); refreshTab();
+});
+$("btnUserSearch").addEventListener("click", loadUsers);
+$("userQuery").addEventListener("keydown", function(e){ if(e.key === "Enter") loadUsers(); });
+$("btnGen").addEventListener("click", generateCodes);
+$("btnCopy").addEventListener("click", copyAllCodes);
+$("btnCodeSearch").addEventListener("click", loadCodes);
+$("codeQuery").addEventListener("keydown", function(e){ if(e.key === "Enter") loadCodes(); });
+$("codeStatus").addEventListener("change", loadCodes);
+$("btnExport").addEventListener("click", exportCsv);
+
+/* 自动恢复会话 */
+(function init(){
+  if(adminToken){
+    api("/api/admin/overview", {skipAuthKick: true})
+      .then(function(){ enterMain(); })
+      .catch(function(){ kickToLogin(""); });
+  }
+})();
+</script>
+</body>
+</html>
