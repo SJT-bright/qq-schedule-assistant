@@ -40,7 +40,7 @@ app.whenReady().then(()=>{
  window.webContents.setWindowOpenHandler(()=>({action:'deny'}));window.webContents.on('will-navigate',event=>event.preventDefault());
  ipcMain.handle('qq:operation',async(event,command,args)=>{try{currentURL(event);return {ok:true,result:await operation(command,args)}}catch(e){return {ok:false,error:e.message}}});
  store.on('changed',state=>{if(!window.isDestroyed())window.webContents.send('qq:state',state);});
- store.on('success',async flags=>{if(flags.sound&&!window.isDestroyed())window.webContents.send('qq:success');if(flags.minimize){try{await driver.minimize(flags.channel);window.minimize();}catch(e){store.step+='；收窗失败：'+e.message;store.emitState();}}});
+ store.on('success',async flags=>{if(flags.sound&&!window.isDestroyed()){try{await driver.sound();}catch(e){store.step+='；成功音未播放：'+e.message;store.emitState();}}if(flags.minimize){try{await driver.minimize(flags.channel);window.minimize();}catch(e){store.step+='；收窗失败：'+e.message;store.emitState();}}});
  window.loadFile(path.join(__dirname,'ui/index.html'));Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'文件',submenu:[{label:'暂停全部',accelerator:'CommandOrControl+.',click:()=>store.stop()},{type:'separator'},{role:'quit'}]},{label:'编辑',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},{label:'视图',submenu:[{label:'浅色 / 深色',click:()=>{nativeTheme.themeSource=nativeTheme.shouldUseDarkColors?'light':'dark';window.webContents.send('qq:theme',nativeTheme.shouldUseDarkColors);}}, {role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'}]}]));
  if(!testMode)setInterval(()=>void store.tick(),1000).unref();window.on('closed',()=>{store.dispose();app.quit();});
 });

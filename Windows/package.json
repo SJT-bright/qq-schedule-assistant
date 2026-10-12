@@ -46,6 +46,10 @@
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true
-    }
+    },
+    "asarUnpack": [
+      "native/**",
+      "ui/success.wav"
+    ]
   }
 }
