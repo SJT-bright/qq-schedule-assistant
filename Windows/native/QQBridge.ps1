@@ -1,4 +1,4 @@
-# UI Automation bridge. Each submit token is consumed before the sole send key.
+﻿# UI Automation bridge. Each submit token is consumed before the sole send key.
 # Unknown/incomplete UIA structures fail closed; inspect never modifies QQ.
 $ErrorActionPreference='Stop'
 [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
