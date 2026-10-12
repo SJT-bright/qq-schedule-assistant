@@ -35,4 +35,12 @@ Windows Node隔离回归39项通过，其中Swift oracle五个排期场景与100
 
 Windows真实QQ控件、图文发送、微信和普通文件提交尚未完成实机验收；声音设备、真实QQ收窗和Windows10/11设备/DPI组合也未用runner结果替代。发布安装包不能代表这些外部能力已通过。
 
-发布版本不含个人资料。macOS固定签名包、Windows安装包、便携包与SHA256SUMS通过发布流水线从已验证构建生成；发布后另执行远程文件回读和下载哈希比对。
+发布版本不含个人资料。[v3.9.6 下载页](https://github.com/SJT-bright/qq-schedule-assistant/releases/tag/v3.9.6) 已公开，标签指向 `9b6e859186d8c067a1e70c81e40ef62e25a352ce`。Mac包由本机固定证书构建，Windows两包直接采用上述已通过打包后交互验收的Windows runner产物；发布时验证Windows源码树一致，未以本机跨平台候选产物代替。
+
+[发布流水线](https://github.com/SJT-bright/qq-schedule-assistant/actions/runs/38269826979) 成功后，[独立下载复查](https://github.com/SJT-bright/qq-schedule-assistant/actions/runs/38270815168) 从GitHub Release重新下载全部资产，SHA256SUMS、预先固定哈希、ZIP完整性、Windows内部x64 PE与原生桥解包路径均通过；个人数据库与会话文件检查通过。本机另下载发布产物归档，归档与内部四个文件哈希全部一致。
+
+| 下载文件 | SHA256 |
+| --- | --- |
+| QQScheduleAssistant-3.9.6-macOS-arm64.zip | `c99bc9eb75c2267a1d480f2ac26a351ff088f0d9f1b45e2ea1b78a56aeb75ab0` |
+| QQScheduleAssistant-3.9.6-Windows-x64.exe | `658b19f366780f2076cf03557d2cb894459daa03fdafec2832ff0d01aa9cce87` |
+| QQScheduleAssistant-3.9.6-Windows-x64.zip | `31c679aa29496fff28c97c1f3a8afb4ca7683d2ebd20e9c27c79b9b489225251` |

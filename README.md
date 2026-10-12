@@ -28,7 +28,7 @@ bash test.sh
 
 macOS 新增数据库连接故障自动重连一次，仍无法保存时停止全部队列；发送工作台分为「发送队列」「排期与间隔」「发送进度」三页。安装前备份资料，使用固定证书构建后正常退出并重开，核对实际运行映像。
 
-Windows 安装包与便携版见 [GitHub Releases](https://github.com/SJT-bright/qq-schedule-assistant/releases)。Windows 界面、数据字段与业务流程按当前 Mac 版移植；首次运行空库，不含个人资料。开发与使用见 [Windows/README.md](Windows/README.md)，验收差异见 [版本验收记录](docs/release-3.9.6/REPORT.md)。
+Mac 包、Windows 安装包与便携版见 [v3.9.6 最新下载](https://github.com/SJT-bright/qq-schedule-assistant/releases/tag/v3.9.6)。公开下载后的文件哈希及包内检查已通过。Windows 界面、数据字段与业务流程按当前 Mac 版移植；首次运行空库，不含个人资料。开发与使用见 [Windows/README.md](Windows/README.md)，验收差异见 [版本验收记录](docs/release-3.9.6/REPORT.md)。
 
 **Windows 是首个适配候选，尚未完成真实 Windows QQ 的群定位、图文发送和发送后核验。Windows 微信自动发送与普通文件自动发送没有已验证契约，对应路径明确拦截；不能称全部功能已完成 1:1 实机验收。** 隔离界面、业务测试和 Windows runner 结果分别记录，不代表实际群消息送达。
 
