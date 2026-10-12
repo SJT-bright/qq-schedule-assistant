@@ -12,13 +12,16 @@ struct TextTemplateRow: View {
     @Binding var expanded: Bool
     @State private var draft: String
     @State private var hovering = false
+    /// 删除前的二次确认：与在用的文案区（ComposeView）同一套交互——使用说明要求
+    /// 「删除前会二次确认并显示该条的首行标题」，这里原先是一点即删。
+    @State private var pendingDelete = false
 
     init(template: TextTemplate, workspaceID: String, selectedID: Binding<String?>, selectedText: Binding<String>, onDelete: @escaping () -> Void = {}, expanded: Binding<Bool>) {
         self.template = template; self.workspaceID = workspaceID; _selectedID = selectedID; _selectedText = selectedText; self.onDelete = onDelete; _expanded = expanded
         _draft = State(initialValue:template.text)
     }
     private var selected: Bool { selectedID == template.id }
-    private var firstLine: String { TextTemplate(text:draft).title }
+    private var firstLine: String { draft.components(separatedBy: .newlines).first ?? "" }
 
     var body: some View {
         VStack(alignment:.leading,spacing:0) {
@@ -36,11 +39,11 @@ struct TextTemplateRow: View {
                             .frame(maxWidth:.infinity,alignment:.leading)
                             .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.86))
                     }.contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("选用：\(firstLine.isEmpty ? "未命名文案" : firstLine)")
+                }.buttonStyle(GhostPressButtonStyle()).quietHover(lift: 2, scale: 1).accessibilityLabel("选用：\(firstLine.isEmpty ? "未命名文案" : firstLine)")
 
                 CopyButton("复制文案") { try ClipboardCopy.text(draft) }.disabled(draft.isEmpty)
                 if !expanded && hovering {
-                    Button(action: onDelete) { Image(systemName: "trash") }
+                    Button { pendingDelete = true } label: { Image(systemName: "trash") }
                         .buttonStyle(SoftButtonStyle(tint: Theme.rose))
                         .help("删除这条文案")
                 }
@@ -48,7 +51,7 @@ struct TextTemplateRow: View {
                     if expanded { save() }
                     withAnimation(reduceMotion ? nil : .spring(response:0.3,dampingFraction:1)) { expanded.toggle() }
                 } label: { Image(systemName:expanded ? "chevron.up" : "chevron.down").frame(width:24,height:24) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(expanded ? "收起文案" : "展开文案")
+                    .buttonStyle(GhostPressButtonStyle()).quietHover(lift: 1.5, scale: 1.04).foregroundStyle(.secondary).accessibilityLabel(expanded ? "收起文案" : "展开文案")
             }.padding(13)
 
             if expanded {
@@ -61,7 +64,7 @@ struct TextTemplateRow: View {
                     Text("\(draft.count) 字 · \(draft == template.text ? "已保存" : "待保存")")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                     Spacer()
-                    Button(action: onDelete) { Label("删除", systemImage: "trash") }
+                    Button { pendingDelete = true } label: { Label("删除", systemImage: "trash") }
                         .buttonStyle(SoftButtonStyle(tint: Theme.rose))
                     Button("另存一份") { store.perform { _ = try store.saveTextTemplate(text:draft) } }
                         .buttonStyle(SoftButtonStyle(tint: Theme.indigo))
@@ -81,7 +84,16 @@ struct TextTemplateRow: View {
         .shadow(color: selected ? Theme.indigo.opacity(0.16) : .clear, radius: 8, y: 4)
         .onHover { hovering = $0 }
         .onChange(of:draft) { _,value in if selected { selectedText = value } }
+        // 外部（如「保存并同步」）改过同一条文案时回灌：只有本地还没改动过才跟随，
+        // 否则 onDisappear 会用陈旧 draft 把新正文覆盖掉（5-18）。
+        .onChange(of: template.text) { old, value in if draft == old { draft = value } }
         .onDisappear { if draft != template.text { save() } }
+        .alert("删除这条文案？", isPresented: $pendingDelete, presenting: template) { item in
+            Button("删除", role: .destructive) { pendingDelete = false; onDelete() }
+            Button("取消", role: .cancel) { pendingDelete = false }
+        } message: { item in
+            Text("将删除「\(item.title.isEmpty ? "未命名文案" : item.title)」。素材与发送记录不受影响。")
+        }
     }
 
     private func save() {

@@ -1,0 +1,535 @@
+{
+  "cases" : [
+    {
+      "days" : 1,
+      "jitter" : false,
+      "label" : "single",
+      "offset" : 0,
+      "recipients" : [
+        "验收群A",
+        "验收群B"
+      ],
+      "scheduled" : [
+        800000300,
+        800002100
+      ],
+      "starts" : 800000300,
+      "times" : [
+
+      ]
+    },
+    {
+      "days" : 3,
+      "jitter" : false,
+      "label" : "multi-day",
+      "offset" : 0,
+      "recipients" : [
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B"
+      ],
+      "scheduled" : [
+        800000300,
+        800002100,
+        800086700,
+        800088500,
+        800173100,
+        800174900
+      ],
+      "starts" : 800000300,
+      "times" : [
+
+      ]
+    },
+    {
+      "days" : 2,
+      "jitter" : false,
+      "label" : "multi-round",
+      "offset" : 0,
+      "recipients" : [
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B"
+      ],
+      "scheduled" : [
+        800067600,
+        800069400,
+        800085600,
+        800087400,
+        800103600,
+        800105400,
+        800154000,
+        800155800,
+        800172000,
+        800173800,
+        800190000,
+        800191800
+      ],
+      "starts" : 800035200,
+      "times" : [
+        "09:00",
+        "14:00",
+        "19:00"
+      ]
+    },
+    {
+      "days" : 2,
+      "jitter" : false,
+      "label" : "shifted",
+      "offset" : 3600,
+      "recipients" : [
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B"
+      ],
+      "scheduled" : [
+        800003900,
+        800005700,
+        800090300,
+        800092100
+      ],
+      "starts" : 800000300,
+      "times" : [
+
+      ]
+    },
+    {
+      "days" : 2,
+      "jitter" : true,
+      "label" : "jitter",
+      "offset" : 0,
+      "recipients" : [
+        "验收群A",
+        "验收群B",
+        "验收群A",
+        "验收群B"
+      ],
+      "scheduled" : [
+        800000300,
+        800002460,
+        800086700,
+        800088860
+      ],
+      "starts" : 800000300,
+      "times" : [
+
+      ]
+    }
+  ],
+  "clock" : 800000000,
+  "jitterSeeds" : [
+    {
+      "text" : "seed0",
+      "value" : 34
+    },
+    {
+      "text" : "seed1",
+      "value" : 33
+    },
+    {
+      "text" : "seed2",
+      "value" : 32
+    },
+    {
+      "text" : "seed3",
+      "value" : 30
+    },
+    {
+      "text" : "seed4",
+      "value" : 32
+    },
+    {
+      "text" : "seed5",
+      "value" : 31
+    },
+    {
+      "text" : "seed6",
+      "value" : 36
+    },
+    {
+      "text" : "seed7",
+      "value" : 35
+    },
+    {
+      "text" : "seed8",
+      "value" : 31
+    },
+    {
+      "text" : "seed9",
+      "value" : 30
+    },
+    {
+      "text" : "seed10",
+      "value" : 34
+    },
+    {
+      "text" : "seed11",
+      "value" : 35
+    },
+    {
+      "text" : "seed12",
+      "value" : 36
+    },
+    {
+      "text" : "seed13",
+      "value" : 31
+    },
+    {
+      "text" : "seed14",
+      "value" : 32
+    },
+    {
+      "text" : "seed15",
+      "value" : 34
+    },
+    {
+      "text" : "seed16",
+      "value" : 35
+    },
+    {
+      "text" : "seed17",
+      "value" : 30
+    },
+    {
+      "text" : "seed18",
+      "value" : 30
+    },
+    {
+      "text" : "seed19",
+      "value" : 31
+    },
+    {
+      "text" : "seed20",
+      "value" : 35
+    },
+    {
+      "text" : "seed21",
+      "value" : 33
+    },
+    {
+      "text" : "seed22",
+      "value" : 31
+    },
+    {
+      "text" : "seed23",
+      "value" : 36
+    },
+    {
+      "text" : "seed24",
+      "value" : 30
+    },
+    {
+      "text" : "seed25",
+      "value" : 35
+    },
+    {
+      "text" : "seed26",
+      "value" : 32
+    },
+    {
+      "text" : "seed27",
+      "value" : 31
+    },
+    {
+      "text" : "seed28",
+      "value" : 33
+    },
+    {
+      "text" : "seed29",
+      "value" : 31
+    },
+    {
+      "text" : "seed30",
+      "value" : 32
+    },
+    {
+      "text" : "seed31",
+      "value" : 33
+    },
+    {
+      "text" : "seed32",
+      "value" : 36
+    },
+    {
+      "text" : "seed33",
+      "value" : 30
+    },
+    {
+      "text" : "seed34",
+      "value" : 31
+    },
+    {
+      "text" : "seed35",
+      "value" : 32
+    },
+    {
+      "text" : "seed36",
+      "value" : 35
+    },
+    {
+      "text" : "seed37",
+      "value" : 36
+    },
+    {
+      "text" : "seed38",
+      "value" : 36
+    },
+    {
+      "text" : "seed39",
+      "value" : 30
+    },
+    {
+      "text" : "seed40",
+      "value" : 36
+    },
+    {
+      "text" : "seed41",
+      "value" : 35
+    },
+    {
+      "text" : "seed42",
+      "value" : 33
+    },
+    {
+      "text" : "seed43",
+      "value" : 33
+    },
+    {
+      "text" : "seed44",
+      "value" : 31
+    },
+    {
+      "text" : "seed45",
+      "value" : 30
+    },
+    {
+      "text" : "seed46",
+      "value" : 35
+    },
+    {
+      "text" : "seed47",
+      "value" : 34
+    },
+    {
+      "text" : "seed48",
+      "value" : 34
+    },
+    {
+      "text" : "seed49",
+      "value" : 33
+    },
+    {
+      "text" : "seed50",
+      "value" : 31
+    },
+    {
+      "text" : "seed51",
+      "value" : 32
+    },
+    {
+      "text" : "seed52",
+      "value" : 34
+    },
+    {
+      "text" : "seed53",
+      "value" : 35
+    },
+    {
+      "text" : "seed54",
+      "value" : 32
+    },
+    {
+      "text" : "seed55",
+      "value" : 33
+    },
+    {
+      "text" : "seed56",
+      "value" : 35
+    },
+    {
+      "text" : "seed57",
+      "value" : 36
+    },
+    {
+      "text" : "seed58",
+      "value" : 34
+    },
+    {
+      "text" : "seed59",
+      "value" : 36
+    },
+    {
+      "text" : "seed60",
+      "value" : 34
+    },
+    {
+      "text" : "seed61",
+      "value" : 33
+    },
+    {
+      "text" : "seed62",
+      "value" : 30
+    },
+    {
+      "text" : "seed63",
+      "value" : 36
+    },
+    {
+      "text" : "seed64",
+      "value" : 33
+    },
+    {
+      "text" : "seed65",
+      "value" : 32
+    },
+    {
+      "text" : "seed66",
+      "value" : 35
+    },
+    {
+      "text" : "seed67",
+      "value" : 34
+    },
+    {
+      "text" : "seed68",
+      "value" : 31
+    },
+    {
+      "text" : "seed69",
+      "value" : 30
+    },
+    {
+      "text" : "seed70",
+      "value" : 34
+    },
+    {
+      "text" : "seed71",
+      "value" : 35
+    },
+    {
+      "text" : "seed72",
+      "value" : 31
+    },
+    {
+      "text" : "seed73",
+      "value" : 32
+    },
+    {
+      "text" : "seed74",
+      "value" : 35
+    },
+    {
+      "text" : "seed75",
+      "value" : 36
+    },
+    {
+      "text" : "seed76",
+      "value" : 32
+    },
+    {
+      "text" : "seed77",
+      "value" : 33
+    },
+    {
+      "text" : "seed78",
+      "value" : 30
+    },
+    {
+      "text" : "seed79",
+      "value" : 31
+    },
+    {
+      "text" : "seed80",
+      "value" : 33
+    },
+    {
+      "text" : "seed81",
+      "value" : 32
+    },
+    {
+      "text" : "seed82",
+      "value" : 30
+    },
+    {
+      "text" : "seed83",
+      "value" : 36
+    },
+    {
+      "text" : "seed84",
+      "value" : 32
+    },
+    {
+      "text" : "seed85",
+      "value" : 31
+    },
+    {
+      "text" : "seed86",
+      "value" : 36
+    },
+    {
+      "text" : "seed87",
+      "value" : 35
+    },
+    {
+      "text" : "seed88",
+      "value" : 30
+    },
+    {
+      "text" : "seed89",
+      "value" : 36
+    },
+    {
+      "text" : "seed90",
+      "value" : 30
+    },
+    {
+      "text" : "seed91",
+      "value" : 32
+    },
+    {
+      "text" : "seed92",
+      "value" : 33
+    },
+    {
+      "text" : "seed93",
+      "value" : 34
+    },
+    {
+      "text" : "seed94",
+      "value" : 35
+    },
+    {
+      "text" : "seed95",
+      "value" : 30
+    },
+    {
+      "text" : "seed96",
+      "value" : 31
+    },
+    {
+      "text" : "seed97",
+      "value" : 33
+    },
+    {
+      "text" : "seed98",
+      "value" : 34
+    },
+    {
+      "text" : "seed99",
+      "value" : 36
+    }
+  ]
+}

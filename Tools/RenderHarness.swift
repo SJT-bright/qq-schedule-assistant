@@ -96,7 +96,8 @@ struct RenderHarness {
 
         let routes: [(String, String)] = [
             ("home", "总览"), ("compose", "新建发送"), ("assets", "素材库"),
-            ("recipients", "群与联系人"), ("queue", "发送队列"), ("history", "发送记录"),
+            ("recipients", "群与联系人"), ("queue", "发送队列"), ("schedule", "排期与间隔"),
+            ("progress", "发送进度"), ("history", "发送记录"),
             ("member", "会员中心"), ("settings", "设置与备份")
         ]
         let size = CGSize(width: 1280, height: 880)

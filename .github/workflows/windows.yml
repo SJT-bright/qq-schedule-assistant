@@ -1,0 +1,56 @@
+name: Windows desktop build
+on:
+  workflow_dispatch:
+  push:
+    paths: ['Windows/**', '.github/workflows/windows.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: Windows/package-lock.json
+      - name: Install pinned dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Backend and guard regression
+        run: npm test
+      - name: Parse native bridge and compile Windows UIA helpers
+        shell: pwsh
+        run: |
+          $errors = $null
+          $tokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path native/QQBridge.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | Format-List; exit 1 }
+          $request = '{"id":"ci-inspect","command":"inspect","args":{}}'
+          $request | powershell.exe -NoProfile -STA -File native/QQBridge.ps1 | Set-Content native-inspect.json
+          $result = Get-Content native-inspect.json | ConvertFrom-Json
+          if (-not $result.ok -or -not $result.result.readOnly) { throw 'Native bridge smoke failed' }
+      - name: Actual isolated Electron workflows
+        run: npm run test:e2e
+      - name: Build Windows installer and portable ZIP
+        run: npm run build
+      - name: Packaged executable UI workflows
+        shell: pwsh
+        run: |
+          $env:QQ_ELECTRON_EXE = (Resolve-Path '../dist/windows/win-unpacked/QQ排程助手.exe').Path
+          $env:QQ_PACKAGED = '1'
+          $env:QQ_E2E_OUTPUT = '../build/release-20261012/windows-packaged-e2e'
+          npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-3.9.6-build116
+          path: |
+            dist/windows/*.exe
+            dist/windows/*.zip
+            build/release-20261012/windows-e2e/
+            build/release-20261012/windows-packaged-e2e/
+            Windows/native-inspect.json

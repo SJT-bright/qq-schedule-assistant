@@ -20,3 +20,11 @@ AGENTS.md
 *.sqlite3-shm
 *.db
 *.log
+
+# Cross-platform development and private installation evidence
+Windows/node_modules/
+Windows/native-inspect.json
+Windows/*.log
+build-*/
+AGENT_PROGRESS.md
+安装最新版.command

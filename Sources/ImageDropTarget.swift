@@ -35,7 +35,10 @@ struct ImageDropTarget: NSViewRepresentable {
     var onBrowse: () -> Void
     func makeNSView(context: Context) -> DropSurface {
         let view = DropSurface()
+        // 四个回调在首帧就挂好，不能只靠紧随其后的 updateNSView：
+        // 首帧内若有拖放到达，performDragOperation 会命中默认空闭包并返回 true，拖入被静默吞掉（2-29）
         view.hint = hint; view.activeHint = activeHint
+        view.onDrop = onDrop; view.onError = onError; view.onBrowse = onBrowse
         return view
     }
     func updateNSView(_ view: DropSurface, context: Context) {

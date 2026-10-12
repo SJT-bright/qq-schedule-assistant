@@ -115,7 +115,8 @@
     .hero-grid,.feat-grid,.price-grid{grid-template-columns:1fr}
     .steps{grid-template-columns:repeat(2,1fr)}
     h1{font-size:31px}
-    .nav-links{display:none}
+    .nav-inner{flex-wrap:wrap;gap:12px;height:auto;min-height:64px;padding-top:12px;padding-bottom:12px}
+    .nav-links{display:flex;order:3;width:100%;justify-content:space-between;gap:8px;font-size:12px}
   }
 </style>
 </head>
@@ -130,7 +131,7 @@
       <a href="#buy">购买与兑换</a>
       <a href="#faq">常见问题</a>
     </div>
-    <a class="nav-cta" href="#pricing">免费试用 3 天</a>
+    <a class="nav-cta" href="#pricing">免费试用 <span data-trial-days>3 天</span></a>
   </div>
 </nav>
 
@@ -139,7 +140,7 @@
     <div>
       <div class="badge-row">
         <span class="badge">macOS 原生应用</span>
-        <span class="badge"><b>新用户注册即送 3 天试用</b></span>
+        <span class="badge"><b>新用户注册即送 <span data-trial-days>3 天</span>试用</b></span>
         <span class="badge">本机自动化 · 数据留本机</span>
       </div>
       <h1>QQ 消息排程，<br>交给<span class="hl">计划</span>自动执行</h1>
@@ -216,7 +217,7 @@
         <a class="btn btn-ghost" href="#buy">购买卡密</a>
       </div>
     </div>
-    <p class="trial-note">🎁 新用户注册即送 <b>3 天</b>全功能试用，无需绑卡；试用到期后再决定是否开通。</p>
+    <p class="trial-note">🎁 新用户注册即送 <b data-trial-days>3 天</b>全功能试用，无需绑卡；试用到期后再决定是否开通。</p>
   </div>
 </section>
 
@@ -242,7 +243,7 @@
       <span class="kicker">FAQ</span>
       <h2>常见问题</h2>
     </div>
-    <div class="qa"><h3>试用需要付费吗？会自动扣费吗？</h3><p>不需要。注册即送 3 天全功能试用，试用结束后如需继续使用，购买卡密兑换即可。本产品为卡密预付费制，<b>没有任何自动扣费</b>。</p></div>
+    <div class="qa"><h3>试用需要付费吗？会自动扣费吗？</h3><p>不需要。注册即送 <span data-trial-days>3 天</span>全功能试用，试用结束后如需继续使用，购买卡密兑换即可。本产品为卡密预付费制，<b>没有任何自动扣费</b>。</p></div>
     <div class="qa"><h3>在哪里购买卡密？</h3><p>通过官方指定渠道购买：发卡平台自动发货、微店下单，或联系管理员人工发货。付款后即可获得形如 <b>QP-M-XXXX-XXXX</b> 的卡密。</p></div>
     <div class="qa"><h3>兑换后剩余时长会浪费吗？</h3><p>不会。会员时长采用<b>滑动叠加</b>：新兑换的天数从当前到期时间继续向后累加，剩余时长完整保留。</p></div>
     <div class="qa"><h3>换电脑或重装后会员还在吗？</h3><p>在。会员时长跟随账号，同一账号在任意 Mac 上登录即可继续使用。</p></div>
@@ -271,7 +272,13 @@
 <script>
 /* 从服务端拉取最新档位配置，覆盖兜底价格（拉取失败时保留上方静态内容） */
 (function(){
-  fetch("/api/plans").then(function(r){ return r.json(); }).then(function(list){
+  fetch("/api/plans").then(function(r){
+    var days = Number(r.headers.get("X-Trial-Days"));
+    if(r.headers.has("X-Trial-Days") && Number.isInteger(days) && days >= 0 && days <= 3650){
+      document.querySelectorAll("[data-trial-days]").forEach(function(el){ el.textContent = days + " 天"; });
+    }
+    return r.json();
+  }).then(function(list){
     if(!Array.isArray(list) || !list.length) return;
     var box = document.getElementById("planCards");
     box.innerHTML = "";

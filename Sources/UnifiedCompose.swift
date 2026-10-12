@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CryptoKit
 import UniformTypeIdentifiers
 
 // MARK: - 一体化发送内容模型
@@ -78,8 +79,11 @@ enum UnifiedPasteCollector {
     static func writePNG(_ image: NSImage) -> URL? {
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { return nil }
-        let name = "剪贴板-\(Int(Date().timeIntervalSince1970))-\(Int.random(in: 100...999)).png"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        // 按内容命名：同一张图重复 ⌘V 得到同一个路径，框内按 path 去重才真的生效，
+        // 素材库的「sha256 + 同名复用」也才用得上（随机时间戳名会绕开它，产出两份同图，5-14）。
+        let digest = SHA256.hash(data: png).prefix(6).map { String(format: "%02x", $0) }.joined()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("剪贴板-\(digest).png")
+        if FileManager.default.fileExists(atPath: url.path) { return url }
         do { try png.write(to: url, options: .atomic); return url } catch { return nil }
     }
 }
@@ -99,6 +103,10 @@ struct UnifiedComposerView: View {
     @State private var dropTargeted = false
     @State private var importPulse = false
     @State private var cmdVMonitor: Any?
+    /// 进程级「当前 ⌘V 监视器」。句柄只放在实例 `@State` 里时，SwiftUI 换 identity 时
+    /// 不保证旧实例的 `onDisappear` 早于新实例的 `onAppear`，两个监视器会同时挂着，
+    /// 一次 ⌘V 触发两次 `pasteFromClipboard()`，而 `merge` 对文字是追加 → 文案整段重复（5-24）。
+    private static var activeMonitor: Any?
 
     private var content: UnifiedContent { UnifiedContent(text: text, images: images) }
     private var links: [URL] { content.detectedLinks }
@@ -128,17 +136,25 @@ struct UnifiedComposerView: View {
     /// 新建发送页内：焦点不在任何文本输入框时，⌘V 直接触发「一键粘贴导入」
     private func installCmdVMonitor() {
         guard cmdVMonitor == nil else { return }
-        cmdVMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        // 先把上一个实例留下的监视器摘掉，保证同一时刻全进程只有一个 ⌘V 监听
+        if let previous = UnifiedComposerView.activeMonitor as AnyObject? { NSEvent.removeMonitor(previous) }
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.modifierFlags.contains(.command),
                   event.charactersIgnoringModifiers?.lowercased() == "v" else { return event }
             guard !UnifiedComposerView.textEditingHasFocus() else { return event }
             pasteFromClipboard()
             return nil
         }
+        cmdVMonitor = monitor
+        UnifiedComposerView.activeMonitor = monitor
     }
 
     private func removeCmdVMonitor() {
-        if let monitor = cmdVMonitor { NSEvent.removeMonitor(monitor); cmdVMonitor = nil }
+        guard let monitor = cmdVMonitor as AnyObject? else { return }
+        cmdVMonitor = nil
+        NSEvent.removeMonitor(monitor)
+        // 只有还轮到自己时才腾空进程级句柄：新实例此刻可能已经装好了它自己的
+        if UnifiedComposerView.activeMonitor as AnyObject? === monitor { UnifiedComposerView.activeMonitor = nil }
     }
 
     /// 当前键窗口的第一响应者是否为文本编辑控件（TextEditor / 输入框）
@@ -226,7 +242,8 @@ struct UnifiedComposerView: View {
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(GhostPressButtonStyle())
+                        .quietHover(lift: 1.5, scale: 1.04)
                         .help("从文案中删除这行链接")
                     }
                     .foregroundStyle(Theme.blue)
@@ -289,7 +306,8 @@ struct UnifiedComposerView: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(GhostPressButtonStyle())
+                        .quietHover(lift: 1.5, scale: 1.04)
                         .help("移除这张图片")
                     }
                     .padding(.horizontal, 8)
@@ -493,10 +511,22 @@ extension Store {
                              selectAssets: ([String]) -> Void,
                              setText: (String) -> Void) throws -> UnifiedImportResult {
         // 1) 图片：统一走现有 importFiles（内部按 sha256 + 文件名去重）
+        // 共享的 error 记的是「最近一次尚未被消解的错误」，不是本次操作的结果：
+        // 直接读它会让一条无关的旧错误把成功的导入判成失败（图片已进素材库、文案没写、框不清空，5-05）。
+        // 这里把通道腾空，只认 importFiles 这次写进去的内容，随后原样归还旧错误，不让它被本次操作吞掉。
         var importedIDs: [String] = []
         if !content.images.isEmpty {
+            let carried = error
+            error = nil
             importedIDs = importFiles(content.images.map(\.fileURL))
-            if let failure = error { throw AppError("图片导入失败：\(failure)") }
+            let failure = error
+            error = carried
+            if let failure { throw AppError("图片导入失败：\(failure)") }
+            // 成功判据补齐：importFiles 对每个 URL 必然产出一个 id（同图复用也会），
+            // 数量对不上却没写错误 = 静默半途，这里如实报错，不能让「应用到本次发送」假装成功。
+            guard importedIDs.count == content.images.count else {
+                throw AppError("图片导入未完成：期望 \(content.images.count) 张，实际入库 \(importedIDs.count) 张，请重试或改用「从访达选图」")
+            }
         }
 
         // 2) 文字：存成文案模板（已有完全相同的文案就复用，避免文案库被重复导入撑爆）

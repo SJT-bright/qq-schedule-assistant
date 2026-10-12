@@ -15,7 +15,7 @@ import SwiftUI
 enum TodayTimeline {
     /// 已确认发送完成的状态（计入「已发」）
     static let sentStatuses = ["verified", "manual"]
-    /// 需要用户关注的状态（与总览页「待人工处理」口径一致）
+    /// 今天时刻表里仍要看见的未完成状态。已暂停单独算，不并进「待核对」。
     static let attentionStatuses = ["draft", "uncertain", "blocked", "submitted"]
     /// 整体淡化显示的状态（已完成或已取消）
     static let doneStatuses = ["verified", "manual", "cancelled"]
@@ -62,12 +62,17 @@ struct TodayTimelineView: View {
     var running: Bool
     var onRetry: ((String) -> Void)? = nil
     var retryEnabled = true
+    /// 宿主按队列引擎口径（`Scheduling.nextCandidate`）算出的「下一群」任务 ID。
+    /// 不传时组件只能用兜底口径，见 `fallbackNextID` 的局限性说明。
+    var nextDeliveryID: String? = nil
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var s: Surface { Surface(scheme) }
-    private var calendar: Calendar { Scheduling.calendar }
+    /// 每访问一次 `Scheduling.calendar` 都会新建一个 Calendar；这里按视图实例缓存一份，
+    /// 一次渲染里的多处取时都用它（时区口径仍是 Asia/Shanghai，与排期引擎一致）。
+    private let calendar = Scheduling.calendar
 
     // 时间线圆点要与时间胶囊的竖直中心对齐，这几个常量共同决定对齐位置。
     private let rowVerticalPadding: CGFloat = 6
@@ -75,16 +80,22 @@ struct TodayTimelineView: View {
     private let dotSize: CGFloat = 9
     private var topSegmentHeight: CGFloat { rowVerticalPadding + chipHeight / 2 - dotSize / 2 }
 
-    private var today: [Delivery] { TodayTimeline.todays(deliveries, calendar: calendar) }
-    /// 「下一个待执行」：今天按时间排序后第一条 queued（与队列引擎的取法一致）
-    private var nextID: String? { today.first(where: { $0.status == "queued" })?.id }
+    /// 「下一群」优先用宿主传入的引擎结果；没传时才兜底取今天最早、且确实会被自动派发的那条：
+    /// 排除一次性补草稿记录、已提交（submittedAt）与带发送凭据（evidence）的记录。
+    /// 兜底不含冷却顺延与 activePlanID 过滤，多计划并发时仍可能错位，所以宿主应当显式传入（4-05）。
+    private func nextID(in today: [Delivery]) -> String? {
+        nextDeliveryID ?? today.first { $0.status == "queued" && !$0.isOneOff && $0.submittedAt == nil && $0.evidence.isEmpty }?.id
+    }
 
-    private var sentCount: Int { today.filter { TodayTimeline.sentStatuses.contains($0.status) }.count }
-    /// 还会发出去的：待执行 / 正在处理 / 草稿 / 已暂停（已取消与结果未知不计入）
-    private var pendingCount: Int { today.filter { ["queued", "running"].contains($0.status) }.count }
-    private var attentionCount: Int { today.filter { TodayTimeline.attentionStatuses.contains($0.status) }.count }
+    // 下面几个计数都吃同一份已过滤排序的 today：一次渲染只扫一遍 deliveries（4-20 同类问题）。
+    private func sentCount(_ today: [Delivery]) -> Int { today.filter { TodayTimeline.sentStatuses.contains($0.status) }.count }
+    /// 还会发出去的：待执行 / 正在处理（草稿与已暂停单独列，已取消与结果未知不计入）
+    private func pendingCount(_ today: [Delivery]) -> Int { today.filter { ["queued", "running"].contains($0.status) }.count }
+    private func reviewCount(_ today: [Delivery]) -> Int { QueueStartGate.reviewCount(today.map(\.status)) }
+    /// 已暂停单独计数，否则某天只剩 blocked 时头部分项加起来对不上「今日 N 条」
+    private func pausedCount(_ today: [Delivery]) -> Int { today.filter { $0.status == "blocked" }.count }
 
-    private var hourGroups: [HourGroup] {
+    private func hourGroups(_ today: [Delivery]) -> [HourGroup] {
         Dictionary(grouping: today) { calendar.component(.hour, from: $0.scheduled) }
             .map { HourGroup(hour: $0.key, items: $0.value) }
             .sorted { $0.hour < $1.hour }
@@ -99,16 +110,19 @@ struct TodayTimelineView: View {
     var body: some View {
         // 每分钟刷新一次：跨天后「今天」的边界与各项计数自动更新
         TimelineView(.periodic(from: .now, by: 60)) { _ in
+            // 过滤 + 排序只做一次，下面的分组、头部计数与「下一群」都复用这份结果
+            let today = TodayTimeline.todays(deliveries, calendar: calendar)
+            let nextGroupID = nextID(in: today)
             VStack(alignment: .leading, spacing: 14) {
-                metricsHeader
+                metricsHeader(today)
                 if today.isEmpty {
                     EmptyPanel(title: "今天没有安排发送任务",
                                symbol: "calendar.badge.clock",
                                message: "创建计划后，这里会按时间列出今天要发送的每一条任务。",
                                tint: Theme.indigo)
                 } else {
-                    ForEach(hourGroups) { group in
-                        hourSection(group)
+                    ForEach(hourGroups(today)) { group in
+                        hourSection(group, nextID: nextGroupID)
                     }
                 }
             }
@@ -117,37 +131,47 @@ struct TodayTimelineView: View {
 
     // MARK: 头部指标行：今日 N 条 · 已发 M · 待发 K · 需关注 X
 
-    private var metricsHeader: some View {
-        ViewThatFits(in: .horizontal) {
+    private func metricsHeader(_ today: [Delivery]) -> some View {
+        let sent = sentCount(today)
+        let pending = pendingCount(today)
+        let review = reviewCount(today)
+        let paused = pausedCount(today)
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) {
-                brandGroup
-                metricDot(color: Theme.green, text: "已发 \(sentCount)")
-                metricDot(color: Theme.blue, text: "待发 \(pendingCount)")
-                metricDot(color: attentionCount > 0 ? Theme.orange : Theme.slate,
-                          text: "需关注 \(attentionCount)",
-                          highlight: attentionCount > 0)
+                brandGroup(today)
+                metricDot(color: Theme.green, text: "已发 \(sent)")
+                metricDot(color: Theme.blue, text: "待发 \(pending)")
+                metricDot(color: review > 0 ? Theme.orange : Theme.slate,
+                          text: "待核对 \(review)",
+                          highlight: review > 0)
+                if paused > 0 {
+                    metricDot(color: Theme.slate, text: "已拦截 \(paused)")
+                }
                 if running { runningBadge }
                 Spacer(minLength: 0)
             }
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 12) {
-                    brandGroup
+                    brandGroup(today)
                     if running { runningBadge }
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: 12) {
-                    metricDot(color: Theme.green, text: "已发 \(sentCount)")
-                    metricDot(color: Theme.blue, text: "待发 \(pendingCount)")
-                    metricDot(color: attentionCount > 0 ? Theme.orange : Theme.slate,
-                              text: "需关注 \(attentionCount)",
-                              highlight: attentionCount > 0)
+                    metricDot(color: Theme.green, text: "已发 \(sent)")
+                    metricDot(color: Theme.blue, text: "待发 \(pending)")
+                    metricDot(color: review > 0 ? Theme.orange : Theme.slate,
+                              text: "待核对 \(review)",
+                              highlight: review > 0)
+                    if paused > 0 {
+                        metricDot(color: Theme.slate, text: "已拦截 \(paused)")
+                    }
                     Spacer(minLength: 0)
                 }
             }
         }
     }
 
-    private var brandGroup: some View {
+    private func brandGroup(_ today: [Delivery]) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "calendar.day.timeline.left")
                 .font(.system(size: 12, weight: .bold))
@@ -157,6 +181,8 @@ struct TodayTimelineView: View {
                 .monospacedDigit()
         }
         .fixedSize()
+        // 本页其余日期文案走系统时区，这里明确标注时刻表用的时区，避免同一屏两套「今天」（4-06）。
+        .help("按北京时间（Asia/Shanghai）的自然日列出，与排期引擎使用同一时区")
     }
 
     private var runningBadge: some View {
@@ -187,7 +213,7 @@ struct TodayTimelineView: View {
 
     // MARK: 小时分组
 
-    private func hourSection(_ group: HourGroup) -> some View {
+    private func hourSection(_ group: HourGroup, nextID: String?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text("\(group.hour) 时")
@@ -198,15 +224,14 @@ struct TodayTimelineView: View {
             }
             .padding(.bottom, 7)
             ForEach(Array(group.items.enumerated()), id: \.element.id) { index, job in
-                timelineRow(job, isFirst: index == 0, isLast: index == group.items.count - 1)
+                timelineRow(job, isFirst: index == 0, isLast: index == group.items.count - 1, isNext: job.id == nextID)
             }
         }
     }
 
     // MARK: 单行（时间线圆点 + 内容卡片）
 
-    private func timelineRow(_ job: Delivery, isFirst: Bool, isLast: Bool) -> some View {
-        let isNext = job.id == nextID
+    private func timelineRow(_ job: Delivery, isFirst: Bool, isLast: Bool, isNext: Bool) -> some View {
         let done = TodayTimeline.doneStatuses.contains(job.status)
         let attention = TodayTimeline.attentionStatuses.contains(job.status)
         let railColor = isNext ? Theme.indigo.opacity(0.45) : s.hairline
@@ -244,7 +269,7 @@ struct TodayTimelineView: View {
                 Pill(text: "下一群", tint: Theme.indigo, symbol: "bolt.fill", variant: .emphasis)
             }
             if job.canRequeue, let onRetry {
-                Button { onRetry(job.id) } label: { Label("已暂停 · 重新入队", systemImage: "arrow.clockwise") }
+                Button { onRetry(job.id) } label: { Label("已拦截 · 去核对", systemImage: "checkmark.seal") }
                     .buttonStyle(SoftButtonStyle(tint: Theme.orange)).disabled(!retryEnabled)
             } else {
             Pill(text: job.statusName, tint: StatusStyle.color(job.status), symbol: StatusStyle.symbol(job.status))
@@ -310,31 +335,36 @@ struct TodayTimelineView: View {
 struct MenuTodaySection: View {
     @EnvironmentObject var store: Store
 
-    private var calendar: Calendar { Scheduling.calendar }
-    private var today: [Delivery] { TodayTimeline.todays(store.deliveries, calendar: calendar) }
-    private var sentCount: Int { today.filter { TodayTimeline.sentStatuses.contains($0.status) }.count }
-    private var nextID: String? { today.first(where: { $0.status == "queued" })?.id }
+    private let calendar = Scheduling.calendar
     private let maxRows = 5
 
+    /// 「下一群」与「今天」各算一次，菜单每次 store 变化都要重绘，避免反复全量过滤排序。
+    private func nextID(in today: [Delivery]) -> String? {
+        store.displayedQueueCandidate?.id ?? today.first { $0.status == "queued" && !$0.isOneOff && $0.submittedAt == nil && $0.evidence.isEmpty }?.id
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        let today = TodayTimeline.todays(store.displayedQueueJobs, calendar: calendar)
+        let nextGroupID = nextID(in: today)
+        return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: "calendar.day.timeline.left")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Theme.indigo)
-                Text("今日 \(today.count) 条 · 已发 \(sentCount)")
+                Text("今日 \(today.count) 条 · 已发 \(today.filter { TodayTimeline.sentStatuses.contains($0.status) }.count)")
                     .font(.system(size: 12, weight: .semibold))
                     .monospacedDigit()
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
+            .help("按北京时间（Asia/Shanghai）的自然日列出，与排期引擎使用同一时区")
             if today.isEmpty {
                 Text("今天没有安排")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(Array(today.prefix(maxRows))) { job in
-                    menuRow(job)
+                    menuRow(job, isNext: job.id == nextGroupID)
                 }
                 if today.count > maxRows {
                     Text("还有 \(today.count - maxRows) 条…")
@@ -345,9 +375,8 @@ struct MenuTodaySection: View {
         }
     }
 
-    private func menuRow(_ job: Delivery) -> some View {
-        let isNext = job.id == nextID
-        return HStack(spacing: 6) {
+    private func menuRow(_ job: Delivery, isNext: Bool) -> some View {
+        HStack(spacing: 6) {
             Text(TodayTimeline.hhmm(job.scheduled, calendar: calendar))
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .monospacedDigit()

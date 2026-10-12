@@ -1,0 +1,51 @@
+{
+  "name": "qq-schedule-assistant-windows",
+  "version": "3.9.6",
+  "description": "QQ 排程助手 Windows 桌面版",
+  "main": "main.cjs",
+  "private": true,
+  "author": "SJT-bright",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "test:e2e": "node test/e2e.cjs",
+    "build": "electron-builder --win nsis zip --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "playwright": "1.64.0"
+  },
+  "build": {
+    "appId": "local.felix.qqdispatch.windows",
+    "productName": "QQ排程助手",
+    "artifactName": "QQScheduleAssistant-${version}-Windows-${arch}.${ext}",
+    "directories": {
+      "output": "../dist/windows"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "lib/**",
+      "native/**",
+      "ui/**",
+      "package.json",
+      "README.md"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "signAndEditExecutable": true,
+      "icon": "ui/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true
+    }
+  }
+}

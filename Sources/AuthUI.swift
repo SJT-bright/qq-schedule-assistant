@@ -136,6 +136,7 @@ struct MembershipView: View {
     @EnvironmentObject var store: Store
     @Environment(\.colorScheme) private var scheme
     @State private var redeemCode = ""
+    @State private var redeemInFlight = false
     @State private var confirmLogout = false
 
     var body: some View {
@@ -165,6 +166,12 @@ struct MembershipView: View {
             .frame(maxWidth: .infinity)
         }
         .task { store.loadLicensePlans() }
+        .onChange(of: store.licenseBusy) { _, busy in
+            // 兑换请求收尾：只有状态确实变为 active（新开通或续费成功）才清空输入；失败保留原文便于改错重试
+            guard redeemInFlight, !busy else { return }
+            redeemInFlight = false
+            if case .active = store.licenseState { redeemCode = "" }
+        }
         .confirmationDialog("确定退出登录？退出后核心功能将锁定，需要重新登录；本机数据与发送队列不受影响。",
                             isPresented: $confirmLogout, titleVisibility: .visible) {
             Button("退出登录", role: .destructive) { store.logout() }
@@ -253,13 +260,25 @@ struct MembershipView: View {
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(Array(store.licensePlans.prefix(3))) { plan in
-                        PlanCard(plan: plan)
+                        PlanCard(plan: plan, isCurrent: isCurrentPlan(plan))
                     }
                 }
             }
             Text(store.guestMode ? "登录或注册后，可使用购买的卡密开通会员。" : "购买卡密后在下方兑换；未到期续费会从原到期日顺延。")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
+    }
+
+    /// 走查遗留：三张套餐卡长得一样，看不出自己买的是哪张。用会员档案的 planLabel 与套餐名做
+    /// 双向包含匹配（服务端命名可能是「月卡」/「月卡会员」这类包含关系）。
+    private func isCurrentPlan(_ plan: PlanInfo) -> Bool {
+        let label: String?
+        switch store.licenseState {
+        case .active(let p), .grace(let p): label = p.planLabel
+        default: label = nil
+        }
+        guard let label, !label.isEmpty else { return false }
+        return plan.name.contains(label) || label.contains(plan.name)
     }
 
     // MARK: 卡密兑换
@@ -281,15 +300,19 @@ struct MembershipView: View {
                 .disabled(store.licenseBusy || redeemCode.trimmingCharacters(in:.whitespaces).isEmpty)
                 .opacity(store.licenseBusy || redeemCode.trimmingCharacters(in:.whitespaces).isEmpty ? 0.5 : 1)
             }
-            Text("卡密可向售卖渠道购买后在此兑换；一次一码，兑换成功立即刷新会员状态。")
+            Text("卡密由发卡渠道提供，购买后把卡密码输入上方即可兑换；一次一码，成功立即刷新会员状态，续费从原到期日顺延。")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
 
     private func submitRedeem() {
         guard !store.licenseBusy else { return }
-        store.redeem(code: redeemCode)
-        redeemCode = ""
+        let code = redeemCode.trimmingCharacters(in: .whitespaces)
+        guard !code.isEmpty else { return }
+        // 走查遗留：此前提交后立刻清空输入框，兑换失败（卡密抄错/服务不可达）就得凭记忆重打整串。
+        // 现在保留原文，只有会员状态确实刷新成功才清空。
+        redeemInFlight = true
+        store.redeem(code: code)
     }
 
     // MARK: 账号与退出
@@ -312,13 +335,17 @@ struct MembershipView: View {
 
 struct PlanCard: View {
     let plan: PlanInfo
+    var isCurrent: Bool = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        DepthSurface(radius: 18, padding: 16, hoverable: true, accent: Theme.amber) {
+        DepthSurface(radius: 18, padding: 16, hoverable: true, accent: isCurrent ? Theme.green : Theme.amber) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 7) {
                     Text(plan.name).font(.system(size: 14, weight: .bold))
+                    if isCurrent {
+                        Pill(text: "当前套餐", tint: Theme.green, symbol: "checkmark.circle.fill")
+                    }
                     Spacer()
                     Pill(text: "\(plan.days) 天", tint: Theme.amber, symbol: "calendar")
                 }

@@ -373,7 +373,9 @@ struct RelationshipInboxTests {
         let job = Delivery(planID: plan.id, planName: plan.name, recipient: r.name, text: plan.text, assets: [], scheduled: plan.starts, mode: "automatic")
         store.recipients = [r]; store.plans = [plan]; store.deliveries = [job]
         try store.persist()
-        let before = try encoded(store.archive)
+        var expectedArchive = store.archive
+        expectedArchive.settings.guestMode = true // Explicit guest entry now persists this preference.
+        let before = try encoded(expectedArchive)
         check(store.handleRelationshipURL(URL(string: "qqdispatch://relationship-maintenance")!), "exact URL accepted")
         check(store.route == "recipients" && store.orderChannel == SendChannel.wechat && !store.running && !store.busy && storeFake.opened.isEmpty, "URL only navigates / no chat open or queue")
         store.guestMode = false
@@ -402,7 +404,8 @@ struct RelationshipInboxTests {
         storeFake.blocked = false
         for _ in 0..<1000 where store.busy { await Task.yield() }
         check(!store.busy && !store.running, "navigation completion does not resume queue")
-        check(try encoded(store.archive) == before, "source actions preserve old recipients plans deliveries and settings exactly")
+        check(try encoded(store.archive) == before, "source actions preserve legacy data and persist only the explicit guest preference")
+        check(try store.db.load("settings", as: Settings.self).first?.guestMode == true, "explicit guest preference survives persistence")
         check(try encoded(store.db.load("recipients", as: Recipient.self)) == encoded([r]), "persisted old recipient unchanged")
         check(try encoded(store.db.load("plans", as: Plan.self)) == encoded([plan]), "persisted old plan unchanged")
         check(try encoded(store.db.load("deliveries", as: Delivery.self)) == encoded([job]), "persisted old delivery unchanged")

@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import AudioToolbox
 
 // MARK: - 配色板
 // 所有颜色都是显式 RGB，避免依赖语义色在明暗两种外观下走形。
@@ -31,6 +33,8 @@ enum Theme {
         case "assets":     return cool
         case "recipients": return LinearGradient(colors: [Theme.violet, Theme.pink], startPoint: .topLeading, endPoint: .bottomTrailing)
         case "queue":      return warm
+        case "schedule":   return LinearGradient(colors: [Theme.blue, Theme.indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case "progress":   return success
         case "history":    return success
         case "member":     return LinearGradient(colors: [Theme.amber, Theme.orange], startPoint: .topLeading, endPoint: .bottomTrailing)
         case "settings":   return steel
@@ -95,7 +99,8 @@ struct DepthSurface<Content: View>: View {
                         )
                         .allowsHitTesting(false)
                     }
-                    .shadow(color: s.shadowSoft, radius: hovering ? 20 : 10, x: 0, y: hovering ? 12 : 6)
+                    // 悬停不再放大阴影半径：半径动画每帧重渲染模糊层。抬起感交给缩放+位移。
+                    .shadow(color: s.shadowSoft, radius: 10, x: 0, y: 6)
                     .shadow(color: s.shadow.opacity(0.7), radius: 1.5, x: 0, y: 1)
             }
             .overlay {
@@ -312,7 +317,9 @@ extension Pill {
     /// 执行方式标签：元信息类，用中性玻璃 + 彩色图标，与状态标签区分开。
     init(mode: String, text: String? = nil, compact: Bool = false) {
         let style = TagStyle.mode(mode)
-        self.init(text: text ?? (mode == "draft" ? "草稿" : "自动"),
+        // draft 模式标签带「模式」后缀：状态词表已把 draft 状态统一叫「未发送」，
+        // 行内状态胶囊旁再出现一枚「草稿」会被当成重复标签（走查 2026-10-06）。
+        self.init(text: text ?? (mode == "draft" ? "草稿模式" : "自动发送"),
                   tint: style.tint, symbol: style.symbol, variant: .neutral, compact: compact)
     }
 }
@@ -350,7 +357,8 @@ struct CollapsibleSection<Content: View>: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GhostPressButtonStyle())
+                .quietHover(lift: 2, scale: 1)
                 .accessibilityLabel(expanded ? "收起\(title)" : "展开\(title)")
 
                 if expanded {
@@ -428,18 +436,293 @@ struct StatTile: View {
     }
 }
 
+// MARK: - 点击反馈（音效 + 触感 + 涟漪）
+// 三层职责：
+//   ClickFX.play  唯一的发声入口，自带 55ms 去重，样式层和全局兜底监听同时命中也只响一声。
+//   RippleLayer   按钮自己画的涟漪+压感高光，顺带在按下那一刻触发 play，覆盖所有套用了它的样式。
+//   installGlobalListener  只兜底 SwiftUI 自绘样式够不到的真实 AppKit 控件（开关、步进器、菜单）；
+//                 命中视图名字里没有控件类名就不响，点在空白处不会发声。
+enum ClickFX {
+    static let soundKey = "clickFXSoundEnabled"
+    static let motionKey = "clickFXMotionEnabled"
+
+    enum Kind: Hashable {
+        case tap
+        case toggle
+
+        // 实测本机时长：Tink 0.56s、Bottle 0.77s，都是能在连点里保持颗粒感的短音。
+        var soundName: String { self == .tap ? "Tink" : "Bottle" }
+    }
+
+    static var soundEnabled: Bool { flag(ClickFX.soundKey) }
+    static var motionEnabled: Bool { flag(ClickFX.motionKey) }
+
+    private static func flag(_ key: String) -> Bool {
+        // 用 object(forKey:) 区分「没存过」和「存了 false」，否则默认开会变成默认关。
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: key) != nil else { return true }
+        return defaults.bool(forKey: key)
+    }
+
+    private static var soundIDs: [Kind: SystemSoundID] = [:]
+    private static var lastPlayedAt: TimeInterval = 0
+    private static var monitor: Any?
+
+    static func play(_ kind: Kind = .tap) {
+        let now = ProcessInfo.processInfo.systemUptime
+        // 一次按下会同时命中样式层和全局兜底监听；55ms 既挡住双响，也不至于让连点糊成一片。
+        guard now - lastPlayedAt > 0.055 else { return }
+        lastPlayedAt = now
+        if soundEnabled { sound(kind) }
+        // macOS 没有「设备是否可感知」的查询 API，系统会在无 Force Touch 等设备上自行抑制。
+        guard motionEnabled else { return }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    /// 卡顿的元凶是 stop()：实测 NSSound 和 AVAudioPlayer 每次 stop()+play() 都要 ~20ms
+    /// （音频引擎停机，与类无关），一次点击吃掉一整个 60fps 帧，而且正好卡在涟漪起步那几帧。
+    /// AudioServices 是系统给「短提示音」准备的 API：交给系统音频服务混音，实测平均 0.39ms，
+    /// 不用池、不用 stop、音量跟随系统「提醒」音量。代价是不能再单独压音量。
+    private static func sound(_ kind: Kind) {
+        let id = soundID(for: kind)
+        guard id != 0 else { return }
+        AudioServicesPlayAlertSound(id)
+    }
+
+    private static var deniedSoundID: SystemSoundID = 0
+
+    /// 点在禁用按钮上的「拒绝」反馈。Basso 是系统通用的「不行」提示音（0.77s），
+    /// 与 tap/toggle 的 Tink/Bottle 一耳就能区分；同样走 AudioServices，不进点击热路径的池子。
+    static func denied() {
+        guard soundEnabled else { return }
+        if deniedSoundID == 0, let url = soundFile("Basso") { AudioServicesCreateSystemSoundID(url as CFURL, &deniedSoundID) }
+        guard deniedSoundID != 0 else { return }
+        AudioServicesPlayAlertSound(deniedSoundID)
+    }
+
+    private static func soundFile(_ name: String) -> URL? {
+        let directory = URL(fileURLWithPath: "/System/Library/Sounds", isDirectory: true)
+        return ["aiff", "aif", "caf", "wav"].lazy.compactMap { ext in
+            let url = directory.appendingPathComponent(name).appendingPathExtension(ext)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }.first
+    }
+
+    static func installGlobalListener() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            if let kind = ClickFX.controlKind(for: event) { play(kind) }
+            return event
+        }
+    }
+
+    /// 首声实测 5.4ms（创建 SystemSoundID 的一次性开销），挪到启动时预创建，点击路径上就不再有这一下。
+    static func warmUp() {
+        // 返回值刻意不用：这里要的就是「把 id 存进缓存」这个副作用。
+        for kind in [Kind.tap, .toggle] { _ = soundID(for: kind) }
+        if deniedSoundID == 0, let url = soundFile("Basso") { AudioServicesCreateSystemSoundID(url as CFURL, &deniedSoundID) }
+    }
+
+    private static func soundID(for kind: Kind) -> SystemSoundID {
+        if let cached = soundIDs[kind] { return cached }
+        var id: SystemSoundID = 0
+        if let url = soundFile(kind.soundName) { AudioServicesCreateSystemSoundID(url as CFURL, &id) }
+        soundIDs[kind] = id
+        return id
+    }
+
+    /// 命中视图的类名里找真实控件。SwiftUI 自绘的 Button 命中到的只是 NSHostingView，
+    /// 这里刻意放过它——否则点空白处也会响；那些按钮由 RippleLayer 自己发声。
+    /// 实测类名：Toggle(.switch)=PlatformSwitch、Stepper=EditTrackingStepper、
+    /// Menu/Picker=SwiftUIPopupButton、NSAlert/NSMenu 里的项=NSButton/NSMenuItemView。
+    private static func controlKind(for event: NSEvent) -> Kind? {
+        guard let content = event.window?.contentView else { return nil }
+        guard let hit = content.hitTest(content.convert(event.locationInWindow, from: nil)) else { return nil }
+        var view: NSView? = hit
+        var depth = 0
+        while let current = view, depth < 6 {
+            let name = String(describing: type(of: current))
+            if name.contains("Switch") || name.contains("Stepper") || name.contains("Slider")
+                || name.contains("Checkbox") || name.contains("RadioButton") || name.contains("Incrementor") {
+                return .toggle
+            }
+            if name.contains("Button") || name.contains("Popup") || name.contains("PopUp")
+                || name.contains("ComboBox") || name.contains("Segmented") || name.contains("Menu") {
+                return .tap
+            }
+            view = current.superview
+            depth += 1
+        }
+        return nil
+    }
+}
+
+/// 涟漪本体：progress 0→1 画一圈从中心扩散并淡出的圆盘。
+/// 单独拆出来是为了能直接喂一个固定 progress 做离屏取证——离屏窗口没有显示刷新驱动，
+/// withAnimation 拿不到中间帧。
+struct RippleDisc: View {
+    var progress: CGFloat
+    var color: Color = .white
+
+    var body: some View {
+        GeometryReader { geo in
+            // 取对角线刚好盖住四个角；用 1.45×长边在宽按钮上会画出一个面积翻倍的巨圆。
+            let side = (geo.size.width * geo.size.width + geo.size.height * geo.size.height).squareRoot()
+            Circle()
+                .fill(color)
+                .frame(width: side, height: side)
+                .scaleEffect(progress)
+                // 必须是 progress 的纯线性式：写成 progress<1 ? … : 0 会让动画两端都取到 0，
+                // 涟漪就再也不扩散出来了。静止时 scale 为 0，圆本身没有面积。
+                .opacity((1 - progress) * 0.45)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+    }
+}
+
+/// 按下瞬间的涟漪 + 按住时常亮的压感高光。
+/// 放在按钮自己的 background 闭包里，所以能被按钮圆角裁住，sheet / popover 里的按钮同样生效。
+struct RippleLayer: View {
+    static let duration: TimeInterval = 0.42
+
+    var pressed: Bool
+    var color: Color = .white
+    var radius: CGFloat = 14
+    var kind: ClickFX.Kind = .tap
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var progress: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            color.opacity(pressed ? 0.17 : 0)
+            RippleDisc(progress: progress, color: color)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .allowsHitTesting(false)
+        .animation(.easeOut(duration: pressed ? 0.08 : 0.22), value: pressed)
+        .onChange(of: pressed) { _, down in
+            guard down else { return }
+            ClickFX.play(kind)
+            restart()
+        }
+    }
+
+    private func restart() {
+        guard !reduceMotion, ClickFX.motionEnabled else { return }
+        progress = 0
+        // 同一轮里先归零再动画会被合并成一次赋值，推到下一个 runloop 才真的从中心扩出来。
+        DispatchQueue.main.async { withAnimation(.easeOut(duration: Self.duration)) { progress = 1 } }
+    }
+}
+
+/// 无边框按钮的点击反馈。外观与 .plain 一致（只画 label），额外补上涟漪和发声，
+/// 用来替换散落在各页的 .buttonStyle(.plain) / .borderless。
+struct GhostPressButtonStyle: ButtonStyle {
+    var tint: Color = Theme.indigo
+    var radius: CGFloat = 10
+    var kind: ClickFX.Kind = .tap
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .overlay(RippleLayer(pressed: configuration.isPressed, color: tint, radius: radius, kind: kind))
+            .modifier(GhostPressScale(pressed: configuration.isPressed))
+    }
+}
+
+private struct GhostPressScale: ViewModifier {
+    var pressed: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        let active = pressed && isEnabled && !reduceMotion
+        content
+            .scaleEffect(active ? 0.975 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.72), value: active)
+    }
+}
+
+// MARK: - 禁用也要有反应（gateDisabled）
+// 裸 .disabled() 的问题：样式层不画禁用态，点了毫无反应，用户只会觉得「卡死了」。
+// 这里统一三件事：视觉压暗（一眼看出点不动）＋ 拒绝音（Basso，与正常点击音明显不同）
+// ＋ 底部提示条（用一句话说明「为什么现在点不了、该怎么办」）。动作语义不变：仍不会触发。
+@MainActor
+final class DeniedFeedback: ObservableObject {
+    static let shared = DeniedFeedback()
+    @Published var message: String?
+    private var clearTask: Task<Void, Never>?
+
+    func fire(_ hint: String) {
+        ClickFX.denied()
+        clearTask?.cancel()
+        message = hint
+        clearTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
+            if !Task.isCancelled { self?.message = nil }
+        }
+    }
+}
+
+struct GateDisabled: ViewModifier {
+    let blocked: Bool
+    var hint: String
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(blocked ? 0.45 : 1)
+            .saturation(blocked ? 0.35 : 1)
+            .accessibilityHint(blocked ? hint : "")
+            .disabled(blocked)
+            .overlay {
+                // overlay 在 disabled 环境之外，点在压暗按钮上仍能收到手势，给拒绝反馈
+                if blocked {
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onTapGesture { DeniedFeedback.shared.fire(hint) }
+                        .accessibilityHidden(true)
+                }
+            }
+    }
+}
+
+/// 底部居中的拒绝提示条，挂在 RootView 上，由 DeniedFeedback 驱动。
+struct DeniedToast: View {
+    @ObservedObject private var feedback = DeniedFeedback.shared
+
+    var body: some View {
+        Group {
+            if let message = feedback.message {
+                HStack(spacing: 8) {
+                    Image(systemName: "hand.raised.fill").font(.system(size: 12, weight: .bold))
+                    Text(message).font(.system(size: 12.5, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 15).padding(.vertical, 9)
+                .background(Capsule().fill(Color.black.opacity(0.85)))
+                .overlay(Capsule().strokeBorder(Theme.amber.opacity(0.6), lineWidth: 1))
+                .shadow(color: .black.opacity(0.30), radius: 10, y: 4)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: feedback.message)
+    }
+}
+
 // MARK: - 3D 按钮样式
 struct DepthButtonStyle: ButtonStyle {
     var gradient: LinearGradient = Theme.brand
     var tint: Color = Theme.indigo
     var compact: Bool = false
+    /// 前景色逃生口（默认仍是白字）。亮色底（琥珀 Theme.warm / Theme.success）上白字对比只有约
+    /// 1.9:1，达不到 WCAG AA；QueuePlainButtonStyle 早有 tintForeground，这里补齐同一能力（5-16）。
+    /// 由调用方按底色显式选择，样式层不擅自改全局按钮配色。
+    var foreground: Color? = nil
     @Environment(\.colorScheme) private var scheme
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: compact ? 12 : 15, style: .continuous)
         configuration.label
             .font(.system(size: compact ? 12.5 : 13.5, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(foreground ?? Color.white)
             .padding(.horizontal, compact ? 12 : 17)
             .padding(.vertical, compact ? 6.5 : 9)
             .background {
@@ -450,12 +733,24 @@ struct DepthButtonStyle: ButtonStyle {
                             .allowsHitTesting(false)
                     }
                     .overlay { shape.strokeBorder(.white.opacity(0.20), lineWidth: 0.7) }
-                    .shadow(color: tint.opacity(scheme == .dark ? 0.55 : 0.34), radius: configuration.isPressed ? 3 : 9, x: 0, y: configuration.isPressed ? 1 : 5)
+                    .overlay {
+                        RippleLayer(pressed: configuration.isPressed,
+                                    color: .white, radius: compact ? 12 : 15)
+                    }
+                    // 按下不再改阴影半径：半径一变整层高斯模糊重渲染，正好落在动画起步帧上；
+                    // 按压深度交给缩放和下移（见 FunctionalButtonHover），阴影保持恒定。
+                    .shadow(color: tint.opacity(scheme == .dark ? 0.55 : 0.34), radius: 9, x: 0, y: 5)
                     .shadow(color: .black.opacity(0.10), radius: 1, x: 0, y: 1)
             }
-            .scaleEffect(configuration.isPressed ? 0.965 : 1)
-            .offset(y: configuration.isPressed ? 1 : 0)
-            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
+            .contentShape(shape)
+            .modifier(FunctionalButtonHover(
+                pressed: configuration.isPressed,
+                pressedScale: 0.965,
+                pressedOffset: 1,
+                lift: 3,
+                hoverScale: 1.016,
+                pressDamping: 0.7
+            ))
     }
 }
 
@@ -463,12 +758,14 @@ struct DepthButtonStyle: ButtonStyle {
 struct SoftButtonStyle: ButtonStyle {
     var tint: Color = Theme.indigo
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.font) private var inheritedFont
 
     func makeBody(configuration: Configuration) -> some View {
         let s = Surface(scheme)
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            // 磅值交给调用方（大字号下才会变），字重留在这里，否则默认档会变细。
+            .font((inheritedFont ?? .system(size: 13)).weight(.medium))
             .foregroundStyle(tint)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -476,12 +773,91 @@ struct SoftButtonStyle: ButtonStyle {
                 shape
                     .fill(s.card.opacity(0.82))
                     .overlay { shape.fill(tint.opacity(configuration.isPressed ? 0.14 : 0.06)) }
-                    .shadow(color: s.shadowSoft, radius: configuration.isPressed ? 1 : 5, x: 0, y: configuration.isPressed ? 0 : 3)
+                    .overlay {
+                        RippleLayer(pressed: configuration.isPressed, color: tint, radius: 14)
+                    }
+                    // 同 DepthButtonStyle：阴影恒定，按压深度只走缩放/位移。
+                    .shadow(color: s.shadowSoft, radius: 5, x: 0, y: 3)
                     .shadow(color: s.shadow.opacity(0.7), radius: 1, x: 0, y: 1)
             }
             .overlay { shape.strokeBorder(tint.opacity(0.16), lineWidth: 0.9) }
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.spring(response: 0.22, dampingFraction: 0.75), value: configuration.isPressed)
+            .contentShape(shape)
+            .modifier(FunctionalButtonHover(
+                pressed: configuration.isPressed,
+                pressedScale: 0.97,
+                pressedOffset: 0,
+                lift: 2.5,
+                hoverScale: 1.012,
+                pressDamping: 0.75
+            ))
+    }
+}
+
+/// 功能按钮的悬停抬起。按下仍用原来的缩放和位移；禁用和减少动态效果时不抬。
+/// 只改变换，不改阴影半径，避免悬停时重绘大面积模糊阴影。
+private struct FunctionalButtonHover: ViewModifier {
+    var pressed: Bool
+    var pressedScale: CGFloat
+    var pressedOffset: CGFloat
+    var lift: CGFloat
+    var hoverScale: CGFloat
+    var pressDamping: CGFloat
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+
+    private var lifted: Bool { hovering && isEnabled && !pressed && !reduceMotion }
+
+    /// 按下和悬停都会改这个值，弹簧才跟得上「悬停中再按下」。
+    private var motionToken: Int {
+        (pressed ? 4 : 0) | (lifted ? 2 : 0) | (hovering ? 1 : 0)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(pressed ? pressedScale : (lifted ? hoverScale : 1))
+            .offset(y: pressed ? pressedOffset : (lifted ? -lift : 0))
+            .animation(.spring(response: 0.22, dampingFraction: pressDamping), value: motionToken)
+            .onHover { inside in
+                let next = inside && isEnabled && !reduceMotion
+                if hovering != next { hovering = next }
+            }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { hovering = false }
+            }
+            .onChange(of: reduceMotion) { _, reduce in
+                if reduce { hovering = false }
+            }
+    }
+}
+
+/// 不替换原有按钮样式。系统描边、无边框和纯图标的按下效果保持原样。
+/// 只做上移和很小的缩放，不加阴影。宽行把 scale 设为 1，避免横向撑开。
+struct QuietHover: ViewModifier {
+    var lift: CGFloat = 2
+    var scale: CGFloat = 1.016
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+
+    private var lifted: Bool { hovering && isEnabled && !reduceMotion }
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(lifted ? scale : 1)
+            .offset(y: lifted ? -lift : 0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.75), value: lifted)
+            .onHover { inside in
+                let next = inside && isEnabled && !reduceMotion
+                if hovering != next { hovering = next }
+            }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { hovering = false }
+            }
+            .onChange(of: reduceMotion) { _, reduce in
+                if reduce { hovering = false }
+            }
     }
 }
 
@@ -491,10 +867,10 @@ struct HoverLift: ViewModifier {
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func body(content: Content) -> some View {
+        // 只做缩放+位移，不叠悬停阴影：悬停阴影的半径动画每帧都重渲染模糊层。
         content
             .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
             .offset(y: hovering && !reduceMotion ? -amount : 0)
-            .shadow(color: hovering && !reduceMotion ? Color.black.opacity(0.14) : .clear, radius: hovering ? 7 : 0, y: hovering ? 3 : 0)
             .animation(.spring(response: 0.34, dampingFraction: 0.72), value: hovering)
             .onHover { hovering = $0 }
     }
@@ -523,6 +899,14 @@ struct PageFadeTransition: ViewModifier {
 
 extension View {
     func hoverLift(_ amount: CGFloat = 3) -> some View { modifier(HoverLift(amount: amount)) }
+    /// 给尚未使用 Depth / Soft 的自绘按钮加悬停。调用放在 `.disabled` 之前，禁用状态才传得进来。
+    func quietHover(lift: CGFloat = 2, scale: CGFloat = 1.016) -> some View {
+        modifier(QuietHover(lift: lift, scale: scale))
+    }
+    /// 「看得见的禁用」：压暗 + 拒绝音 + 底部提示条。替代裸 `.disabled()`。
+    func gateDisabled(_ blocked: Bool, hint: String) -> some View {
+        modifier(GateDisabled(blocked: blocked, hint: hint))
+    }
     /// route 变化时虚化渐入（首页/列表页通用）
     func pageFade(trigger: String) -> some View { modifier(PageFadeTransition(trigger: trigger)) }
 }
@@ -546,7 +930,21 @@ struct PulseDot: View {
                 .shadow(color: color.opacity(0.7), radius: 4)
         }
         .frame(width: 16, height: 16)
-        .onAppear { animating = true }
+        // 光环在 active 为 false 时根本不在视图树里，animating 先置 true 再插进来不会有值变化，
+        // 呼吸灯就永远定格在 2.1 倍透明态（正是「队列刚开始运行」那一下，5-15）。
+        // 与 PermissionLight 同一套做法：出现与上升沿都先归零、下一拍再拉起。
+        .onAppear {
+            animating = false
+            if active { startBreath() }
+        }
+        .onChange(of: active) { _, on in
+            animating = false
+            if on { startBreath() }
+        }
+    }
+
+    private func startBreath() {
+        DispatchQueue.main.async { animating = true }
     }
 }
 
@@ -575,25 +973,33 @@ struct CountdownText: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let remain = target.timeIntervalSince(context.date)
-            let label = Self.format(remain)
-            HStack(spacing: 5) {
-                Image(systemName: "hourglass").font(.system(size: compact ? 10 : 11, weight: .semibold))
-                Text(remain <= 0 ? "\(prefix) · 已到时间" : "\(prefix) \(label)")
-                    .font(.system(size: compact ? 11 : 12, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
+        if target.timeIntervalSinceNow <= 0 {
+            // 已经到点：文案固定成「已到时间」，不再留一个每秒空转的重绘周期（页面停留在总览时白耗电）
+            chip(remain: 0, label: Self.format(0))
+        } else {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let remain = target.timeIntervalSince(context.date)
+                chip(remain: remain, label: Self.format(remain))
             }
-            .foregroundStyle(remain <= 0 ? Theme.green : Theme.indigo)
-            .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(
-                LinearGradient(colors: [(remain <= 0 ? Theme.green : Theme.indigo).opacity(scheme == .dark ? 0.26 : 0.14),
-                                        (remain <= 0 ? Theme.green : Theme.indigo).opacity(scheme == .dark ? 0.12 : 0.06)],
-                               startPoint: .top, endPoint: .bottom),
-                in: Capsule()
-            )
-            .overlay(Capsule().strokeBorder(Color.white.opacity(scheme == .dark ? 0.12 : 0.45), lineWidth: 0.7))
         }
+    }
+
+    private func chip(remain: TimeInterval, label: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "hourglass").font(.system(size: compact ? 10 : 11, weight: .semibold))
+            Text(remain <= 0 ? "\(prefix) · 已到时间" : "\(prefix) \(label)")
+                .font(.system(size: compact ? 11 : 12, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+        .foregroundStyle(remain <= 0 ? Theme.green : Theme.indigo)
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .background(
+            LinearGradient(colors: [(remain <= 0 ? Theme.green : Theme.indigo).opacity(scheme == .dark ? 0.26 : 0.14),
+                                    (remain <= 0 ? Theme.green : Theme.indigo).opacity(scheme == .dark ? 0.12 : 0.06)],
+                           startPoint: .top, endPoint: .bottom),
+            in: Capsule()
+        )
+        .overlay(Capsule().strokeBorder(Color.white.opacity(scheme == .dark ? 0.12 : 0.45), lineWidth: 0.7))
     }
 
     static func format(_ seconds: TimeInterval) -> String {
@@ -612,15 +1018,31 @@ struct EmptyPanel: View {
     let symbol: String
     let message: String
     var tint: Color = Theme.indigo
+    /// 嵌在「接下来」这类半屏卡片里时收成一行说明，避免大图标把正文挤出窗口。
+    var compact: Bool = false
 
     var body: some View {
-        VStack(spacing: 14) {
-            IconTile(symbol: symbol, size: 58, gradient: LinearGradient(colors: [tint, tint.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Text(title).font(.headline)
-            Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320)
+        if compact {
+            HStack(alignment: .top, spacing: 12) {
+                IconTile(symbol: symbol, size: 32, gradient: LinearGradient(colors: [tint, tint.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 13.5, weight: .semibold))
+                    Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
+        } else {
+            VStack(spacing: 14) {
+                IconTile(symbol: symbol, size: 58, gradient: LinearGradient(colors: [tint, tint.opacity(0.65)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Text(title).font(.headline)
+                Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 46)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 46)
     }
 }
 

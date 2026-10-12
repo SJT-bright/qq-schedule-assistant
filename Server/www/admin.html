@@ -102,7 +102,15 @@
   #toast.show{opacity:1}
   #toast.err{border-left-color:var(--red)}
   @media (max-width:960px){.stats{grid-template-columns:repeat(3,1fr)}}
-  @media (max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:560px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    header.top{height:auto;min-height:60px;padding:12px 16px;gap:10px;flex-direction:column;align-items:stretch}
+    .top .brand{font-size:15px}
+    .top .actions{justify-content:flex-end;flex-wrap:wrap}
+    .top .actions .btn{white-space:nowrap}
+    .login-card{width:min(360px,calc(100vw - 32px));padding:32px 24px}
+    #toast{right:16px;max-width:calc(100vw - 32px)}
+  }
 </style>
 </head>
 <body>
@@ -194,6 +202,7 @@
             <option value="">全部状态</option>
             <option value="unused">未使用</option>
             <option value="used">已使用</option>
+            <option value="void">已作废</option>
           </select>
           <input type="text" id="codeQuery" placeholder="按卡密搜索…">
           <button class="btn btn-ghost btn-sm" id="btnCodeSearch">查询</button>
@@ -204,7 +213,7 @@
           <table>
             <thead><tr>
               <th>卡密</th><th>档位</th><th>天数</th><th>面值</th><th>状态</th>
-              <th>备注</th><th>生成时间</th><th>使用者</th><th>使用时间</th>
+              <th>备注</th><th>生成时间</th><th>使用者</th><th>使用时间</th><th>操作</th>
             </tr></thead>
             <tbody id="codeRows"></tbody>
           </table>
@@ -334,6 +343,7 @@ function enterMain(){
   $("loginView").classList.add("hidden");
   $("mainView").classList.remove("hidden");
   loadPlans().then(loadOverview).catch(function(e){ toast(e.message, true); });
+  refreshTab();
 }
 
 /* ===================== 概览 ===================== */
@@ -401,7 +411,7 @@ function loadUsers(){
     d.users.forEach(function(u){
       var tr = document.createElement("tr");
       tr.innerHTML =
-        '<td>' + u.id + '</td>' +
+        '<td>' + u.user_id + '</td>' +
         '<td class="mono">' + esc(u.account) + '</td>' +
         '<td>' + esc(u.created_at_display) + '</td>' +
         '<td>' + esc(u.plan_label) + '</td>' +
@@ -432,7 +442,7 @@ function toggleDisable(u, disable){
     ? "确定禁用账号「" + u.account + "」吗？\n禁用后该账号将无法登录与兑换。"
     : "确定恢复账号「" + u.account + "」吗？";
   if(!confirm(tip)) return;
-  api("/api/admin/users/disable", {method:"POST", body:{user_id:u.id, disabled:disable}})
+  api("/api/admin/users/disable", {method:"POST", body:{user_id:u.user_id, disabled:disable}})
     .then(function(){
       toast(disable ? "已禁用 " + u.account : "已启用 " + u.account);
       loadUsers(); loadOverview();
@@ -442,35 +452,45 @@ function toggleDisable(u, disable){
 
 /* 补时长弹窗 */
 var grantUser = null;
+var grantSubmitting = false;
 function openGrant(u){
+  if(grantSubmitting) return;
   grantUser = u;
-  $("grantAccount").textContent = "#" + u.id + " · " + u.account;
+  $("grantAccount").textContent = "#" + u.user_id + " · " + u.account;
   $("grantDays").value = 30;
   $("grantNote").value = "";
   $("grantMask").classList.remove("hidden");
   $("grantDays").focus();
 }
-$("btnGrantCancel").addEventListener("click", function(){ $("grantMask").classList.add("hidden"); });
-$("grantMask").addEventListener("click", function(e){ if(e.target === this) this.classList.add("hidden"); });
+$("btnGrantCancel").addEventListener("click", function(){ if(!grantSubmitting) $("grantMask").classList.add("hidden"); });
+$("grantMask").addEventListener("click", function(e){ if(e.target === this && !grantSubmitting) this.classList.add("hidden"); });
 $("btnGrantOk").addEventListener("click", function(){
-  if(!grantUser) return;
-  var days = parseInt($("grantDays").value, 10);
-  if(!(days >= 1 && days <= 3650)){ toast("天数需在 1-3650 之间", true); return; }
+  if(!grantUser || grantSubmitting) return;
+  var days = Number($("grantDays").value);
+  if(!Number.isInteger(days) || !(days >= 1 && days <= 3650)){ toast("天数需为 1-3650 之间的整数", true); return; }
+  var target = grantUser;
+  grantSubmitting = true;
+  $("btnGrantOk").disabled = true;
+  $("btnGrantCancel").disabled = true;
   api("/api/admin/users/grant", {method:"POST", body:{
-    user_id: grantUser.id, days: days, note: $("grantNote").value.trim()
+    user_id: target.user_id, days: days, note: $("grantNote").value.trim()
   }}).then(function(d){
     $("grantMask").classList.add("hidden");
-    toast("已为 " + grantUser.account + " 增加 " + days + " 天，新到期时间 " + d.paid_until_display);
+    toast("已为 " + target.account + " 增加 " + days + " 天，新到期时间 " + d.paid_until_display);
     loadUsers(); loadOverview();
-  }).catch(function(e){ toast(e.message, true); });
+  }).catch(function(e){ toast(e.message, true); }).finally(function(){
+    grantSubmitting = false;
+    $("btnGrantOk").disabled = false;
+    $("btnGrantCancel").disabled = false;
+  });
 });
 
 /* ===================== 卡密管理 ===================== */
 
 function generateCodes(){
   var planId = $("genPlan").value;
-  var count = parseInt($("genCount").value, 10);
-  if(!(count >= 1 && count <= 500)){ toast("生成数量需在 1-500 之间", true); return; }
+  var count = Number($("genCount").value);
+  if(!Number.isInteger(count) || !(count >= 1 && count <= 500)){ toast("生成数量需为 1-500 之间的整数", true); return; }
   $("btnGen").disabled = true;
   api("/api/admin/codes/generate", {method:"POST", body:{
     plan_id: planId, count: count, note: $("genNote").value.trim()
@@ -495,7 +515,7 @@ function loadCodes(){
     var tb = $("codeRows");
     tb.innerHTML = "";
     if(!d.codes.length){
-      tb.innerHTML = '<tr><td colspan="9" class="empty">暂无卡密，先在上方生成</td></tr>';
+      tb.innerHTML = '<tr><td colspan="10" class="empty">' + (status || q ? '没有匹配的卡密，请调整筛选或搜索' : '暂无卡密，先在上方生成') + '</td></tr>';
       return;
     }
     d.codes.forEach(function(c){
@@ -507,11 +527,22 @@ function loadCodes(){
         '<td>' + esc(c.price_display) + '</td>' +
         '<td>' + (c.status === "used"
           ? '<span class="badge b-gray">已使用</span>'
-          : '<span class="badge b-green">未使用</span>') + '</td>' +
+          : c.status === "unused" ? '<span class="badge b-green">未使用</span>'
+          : c.status === "void" ? '<span class="badge b-red">已作废</span>'
+          : '<span class="badge b-gray">未知状态</span>') + '</td>' +
         '<td>' + esc(c.note || "-") + '</td>' +
         '<td>' + esc(c.created_at_display) + '</td>' +
         '<td>' + esc(c.used_by_account || "-") + '</td>' +
-        '<td>' + esc(c.used_at_display || "-") + '</td>';
+        '<td>' + esc(c.used_at_display || "-") + '</td>' +
+        '<td>' + (c.status === "unused" ? '<button class="btn btn-danger btn-sm" data-act="void">作废</button>' : '-') + '</td>';
+      var voidButton = tr.querySelector('[data-act="void"]');
+      if(voidButton) voidButton.addEventListener("click", function(){
+        if(voidButton.disabled || !confirm("确认作废卡密 " + c.code + "？作废后不能兑换。")) return;
+        voidButton.disabled = true;
+        api("/api/admin/codes/void", {method:"POST", body:{code:c.code}}).then(function(){
+          toast("卡密已作废"); loadCodes(); loadOverview();
+        }).catch(function(e){ voidButton.disabled = false; toast(e.message, true); });
+      });
       tb.appendChild(tr);
     });
   }).catch(function(e){ toast(e.message, true); });
@@ -543,6 +574,7 @@ function exportCsv(){
   if(q) ps.push("q=" + encodeURIComponent(q));
   var url = "/api/admin/codes/export" + (ps.length ? ("?" + ps.join("&")) : "");
   fetch(url, {headers:{"Authorization": "Bearer " + adminToken}}).then(function(res){
+    if(res.status === 401){ kickToLogin("登录已过期，请重新登录"); throw new Error("登录已过期，请重新登录"); }
     if(!res.ok){ throw new Error("导出失败（HTTP " + res.status + "）"); }
     return res.blob();
   }).then(function(blob){
@@ -585,7 +617,12 @@ function loadRedemptions(){
 
 $("btnLogin").addEventListener("click", doLogin);
 $("pwInput").addEventListener("keydown", function(e){ if(e.key === "Enter") doLogin(); });
-$("btnLogout").addEventListener("click", function(){ kickToLogin(""); });
+$("btnLogout").addEventListener("click", function(){
+  $("btnLogout").disabled = true;
+  api("/api/admin/logout", {method:"POST"}).then(function(){ kickToLogin(""); })
+    .catch(function(e){ toast(e.message, true); })
+    .finally(function(){ $("btnLogout").disabled = false; });
+});
 $("btnRefresh").addEventListener("click", function(){
   loadOverview(); refreshTab();
 });
@@ -603,7 +640,7 @@ $("btnExport").addEventListener("click", exportCsv);
   if(adminToken){
     api("/api/admin/overview", {skipAuthKick: true})
       .then(function(){ enterMain(); })
-      .catch(function(){ kickToLogin(""); });
+      .catch(function(e){ kickToLogin(e.message || "登录已过期，请重新登录"); });
   }
 })();
 </script>

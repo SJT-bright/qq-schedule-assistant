@@ -1,4 +1,10 @@
 import AppKit
+// 构建期脚本：build.sh 以 `build/draw-icon <输出路径>` 调用。
+// 缺参数时原先直接数组越界崩掉，现在给一行用法并按失败退出（非零码仍会让构建停下）。
+guard CommandLine.arguments.count > 1 else {
+    FileHandle.standardError.write(Data("用法: draw-icon <输出 PNG 路径>\n".utf8))
+    exit(2)
+}
 let output = CommandLine.arguments[1]
 let image = NSImage(size:NSSize(width:1024,height:1024))
 image.lockFocus()

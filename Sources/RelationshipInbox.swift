@@ -4,6 +4,21 @@ import CryptoKit
 import Darwin
 
 // This module owns no Recipient, Plan, Delivery, Database or sending API.
+/// 定位名称的保存提示。输入框再改一个字，或名单被刷新，提示就不再代表刚才那一次操作。
+enum AliasFeedback {
+    static let saved = "已保存，仅用于微信定位"
+    struct Update: Equatable {
+        var message: String
+        var field: String
+    }
+    static func afterFieldEdit(message: String, field: String, fieldWhenShown: String) -> String {
+        field == fieldWhenShown ? message : ""
+    }
+    static func afterRosterChange(field: String, fieldWhenShown: String, saved: String) -> Update {
+        Update(message: "", field: field == fieldWhenShown ? saved : field)
+    }
+}
+
 struct RelationshipInboxError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
@@ -92,7 +107,11 @@ struct RelationshipSnapshot: Codable, Equatable {
 enum RelationshipBridgeLocation {
     static let filename = "manual-wechat-v1.json"
     static var defaultAppRoot: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("QQ排程助手")
+        // applicationSupport 在 macOS 上恒有返回，但这里不该用下标硬取：取不到就退回用户目录，
+        // 让目录解析失败表现为「同步目录无效」而不是整个进程崩在启动路径上。
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return support.appendingPathComponent("QQ排程助手")
     }
     static func directory(appRoot: URL, environment: [String: String]) throws -> URL {
         if let override = environment["RELATIONSHIP_ECHO_BRIDGE_DIR"] {
@@ -117,6 +136,25 @@ enum RelationshipInboxFiles {
         if fstatat(dir, name, &st, AT_SYMLINK_NOFOLLOW) == 0 { return true }
         guard errno == ENOENT else { throw RelationshipInboxError("无法确认本地版本记录是否存在") }
         return false
+    }
+    /// 还没有人同步过（缺目录或缺文件）与"文件在但不可用"必须分开：前者给引导，后者才是故障。
+    enum Presence { case absent, present, unavailable }
+    static func presence(directory: URL, name: String) -> Presence {
+        guard !name.contains("/"), !name.contains("\0"), name != ".", name != ".." else { return .unavailable }
+        guard directory.isFileURL, directory.path.hasPrefix("/"), !directory.path.contains("\0") else { return .unavailable }
+        var fd = Darwin.open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard fd >= 0 else { return .unavailable }
+        for component in directory.path.split(separator: "/") {
+            guard component != ".", component != ".." else { close(fd); return .unavailable }
+            let next = openat(fd, String(component), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard next >= 0 else { close(fd); return errno == ENOENT ? .absent : .unavailable }
+            close(fd); fd = next
+        }
+        defer { close(fd) }
+        var st = stat()
+        guard fstatat(fd, name, &st, AT_SYMLINK_NOFOLLOW) == 0 else { return errno == ENOENT ? .absent : .unavailable }
+        // 符号链接也算"在"，交给 signature/read 报真实故障，不在这里降级成首次引导。
+        return .present
     }
     static func directoryFD(_ url: URL) throws -> Int32 {
         guard url.isFileURL, url.path.hasPrefix("/"), !url.path.contains("\0") else { throw RelationshipInboxError("同步目录无效") }
@@ -201,6 +239,9 @@ final class RelationshipInbox: ObservableObject {
     @Published private(set) var sourceNotice: String?
     @Published private(set) var aliases: [String: String] = [:]
     @Published private(set) var isOpening = false
+    @Published private(set) var openingContactID: String?
+    /// 显式刷新，或同步内容真正变化时加一。未改动的定时复查不加，避免把正在输入的别名清掉。
+    @Published private(set) var rosterEpoch = 0
     private let appRoot: URL
     private let bridgeDirectory: URL?
     private let configurationError: String?
@@ -222,7 +263,7 @@ final class RelationshipInbox: ObservableObject {
         if let (data, _) = try? RelationshipInboxFiles.read(directory: appRoot, name: cacheName, limit: 16 * 1024 * 1024) {
             if let saved = (try? JSONDecoder().decode(SnapshotOnly.self, from: data))?.snapshot,
                (try? saved.validate()) != nil {
-                snapshot = saved
+                setSnapshot(saved)
                 revisions[saved.sourceInstanceId] = Revision(number: saved.revision, digest: saved.digest)
                 status = "显示上次有效名单，等待同步校验"
             }
@@ -262,6 +303,52 @@ final class RelationshipInbox: ObservableObject {
     }
     private func historyFailure() -> RelationshipInboxError {
         RelationshipInboxError("本地同步版本记录缺失、损坏或不完整，已停止定位。请保留当前资料并恢复完整版本记录后刷新；不要删除资料重新同步。")
+    }
+    static func parseSyncDate(_ iso: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: iso) { return date }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: iso)
+    }
+    /// 两端同机取系统时钟，真实偏差是亚秒级；超前超过这个量就是源端时间异常，不能再当刚同步。
+    static let futureSyncTolerance: TimeInterval = 90
+    /// 合同没有约定名单有效期，所以满一周只提示核对，不自动收回手动定位入口。
+    static let agedSyncThreshold: TimeInterval = 7 * 86400
+    enum SyncTimeIssue: Equatable { case abnormallyFuture, aged }
+    /// 首次使用者看到的是引导而不是故障；视图的空状态段落已写明后续步骤，这里不再重复整句。
+    static let firstSyncStatus = "还没有同步过名单：请在关系回响勾选联系人后点击“同步到微信维系列表”"
+    static func futureAnomalyStatus(_ iso: String, now: Date = Date(), calendar: Calendar = .current) -> String {
+        "同步时间异常，请在关系回响重新同步：\(humanizedSyncTime(iso, now: now, calendar: calendar))"
+    }
+    /// 显示与放行共用这一条判断，措辞和拦截不会各走一套阈值。
+    static func syncTimeIssue(_ iso: String, now: Date = Date()) -> SyncTimeIssue? {
+        guard let date = parseSyncDate(iso) else { return nil }
+        let elapsed = now.timeIntervalSince(date)
+        if elapsed < -futureSyncTolerance { return .abnormallyFuture }
+        if elapsed >= agedSyncThreshold { return .aged }
+        return nil
+    }
+    // Local-time display for the sync status line; unparseable input keeps the raw wire value.
+    static func humanizedSyncTime(_ iso: String, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let date = parseSyncDate(iso) else { return iso }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let absolute = formatter.string(from: date)
+        let elapsed = now.timeIntervalSince(date)
+        // 几十秒的时钟误差仍算刚同步。一小时乃至跨天超前不能再显示成「刚刚」。
+        if elapsed < -futureSyncTolerance { return "\(absolute)（时间超前）" }
+        let relative: String?
+        if elapsed < 60 { relative = "刚刚" }
+        else if elapsed < 3600 { relative = "\(Int(elapsed / 60)) 分钟前" }
+        else if elapsed < 86400 { relative = "\(Int(elapsed / 3600)) 小时前" }
+        else if elapsed < agedSyncThreshold { relative = "\(Int(elapsed / 86400)) 天前" }
+        else { relative = nil }
+        guard let relative else { return absolute }
+        return "\(absolute)（\(relative)）"
     }
     private func ensureHistory() throws {
         if try RelationshipInboxFiles.exists(directory: appRoot, name: checkpointName) {
@@ -312,10 +399,26 @@ final class RelationshipInbox: ObservableObject {
         var seen = Set<String>()
         return contacts.flatMap(\.tags).filter { seen.insert($0.id).inserted }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+    // Display order for long lists: Finder-like name order, deterministic on equal names.
+    private var sortedContacts: [RelationshipContact] = []
+    @discardableResult
+    private func setSnapshot(_ next: RelationshipSnapshot?) -> RelationshipSnapshot? {
+        snapshot = next
+        sortedContacts = (next?.contacts ?? []).sorted { a, b in
+            let order = a.name.localizedStandardCompare(b.name)
+            return order == .orderedSame ? a.contactId < b.contactId : order == .orderedAscending
+        }
+        return next
+    }
     func filtered(search: String, tagID: String?) -> [RelationshipContact] {
-        contacts.filter { contact in
-            (tagID == nil || contact.tags.contains { $0.id == tagID }) &&
-            (search.isEmpty || contact.name.localizedCaseInsensitiveContains(search) || contact.userNote.localizedCaseInsensitiveContains(search) || contact.tags.contains { $0.name.localizedCaseInsensitiveContains(search) })
+        // A search field accumulates stray spaces (including full-width); they should not blank the list.
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sortedContacts.filter { contact in
+            let savedAlias = alias(for: contact.contactId)
+            return (tagID == nil || contact.tags.contains { $0.id == tagID }) &&
+                (query.isEmpty || contact.name.localizedCaseInsensitiveContains(query) || contact.userNote.localizedCaseInsensitiveContains(query)
+                    || contact.tags.contains { $0.name.localizedCaseInsensitiveContains(query) }
+                    || (!savedAlias.isEmpty && savedAlias.localizedCaseInsensitiveContains(query)))
         }
     }
     func key(for contactID: String) -> String {
@@ -325,7 +428,10 @@ final class RelationshipInbox: ObservableObject {
     }
     func alias(for contactID: String) -> String { aliases[key(for: contactID)] ?? "" }
     func saveAlias(_ alias: String, contactID: String) throws {
-        guard contacts.contains(where: { $0.contactId == contactID }), RelationshipSnapshot.validText(alias, max: 128) else {
+        guard contacts.contains(where: { $0.contactId == contactID }) else {
+            throw RelationshipInboxError("该联系人已不在当前同步名单；请刷新后重新操作")
+        }
+        guard RelationshipSnapshot.validText(alias, max: 128) else {
             throw RelationshipInboxError("微信显示名称应为不超过 128 字的单行文本")
         }
         var next = aliases
@@ -334,32 +440,69 @@ final class RelationshipInbox: ObservableObject {
         try RelationshipInboxFiles.write(JSONEncoder().encode(next), directory: appRoot, name: aliasName)
         aliases = next
     }
+    /// 成功名单的状态行：人数 · 版本 · 同步时间（相对时间按 `now` 现算），满一周追加核对提醒。
+    /// 抽出来是因为「文件没变」的那一拍也要重算——否则「刚刚」和「超过 7 天」会永远冻在首次读取那一瞬间（4-07）。
+    private static func syncedStatus(_ snapshot: RelationshipSnapshot, now: Date = Date()) -> String {
+        var line = "已同步 \(snapshot.contacts.count) 人 · 版本 \(snapshot.revision) · 同步于 \(humanizedSyncTime(snapshot.updatedAt, now: now))"
+        // 满一周仍可用，只是要说清楚：合同没约定有效期，不能自作主张收回定位入口。
+        if syncTimeIssue(snapshot.updatedAt, now: now) == .aged { line += " · 超过 7 天，请核对后重新同步" }
+        return line
+    }
     func refresh(ifModifiedOnly: Bool = false) {
         do {
             do { try ensureHistory() }
             catch { lastSignature = nil; throw error }
             guard let bridgeDirectory else { throw RelationshipInboxError(configurationError ?? "同步目录无效") }
+            // 没人同步过不是故障：只有从没拿到过名单且桥确实缺失时才走引导，其余照旧报失败并保留旧名单。
+            if snapshot == nil, RelationshipInboxFiles.presence(directory: bridgeDirectory, name: RelationshipBridgeLocation.filename) == .absent {
+                isStale = true
+                status = Self.firstSyncStatus
+                return
+            }
             let signature = try RelationshipInboxFiles.signature(directory: bridgeDirectory, name: RelationshipBridgeLocation.filename)
-            if ifModifiedOnly, signature == lastSignature { return }
+            if ifModifiedOnly, signature == lastSignature {
+                // 源文件没动不代表状态行不用动：按当前时间复评相对时间与「满 7 天」。
+                // 只在文案真的变了才赋值，避免每 3 秒白推一次视图刷新。
+                if let snapshot, !isStale {
+                    let line = Self.syncedStatus(snapshot)
+                    if line != status { status = line }
+                }
+                return
+            }
             lastSignature = signature
             let (data, readSignature) = try RelationshipInboxFiles.read(directory: bridgeDirectory, name: RelationshipBridgeLocation.filename, limit: RelationshipSnapshot.maxBytes)
             let next = try RelationshipSnapshot.decode(data)
+            // 源端时钟异常超前的这一份整份不接受：不换名单、不动版本高水位、不覆盖有效缓存，只标记过期并说明原因。
+            if Self.syncTimeIssue(next.updatedAt) == .abnormallyFuture {
+                isStale = true
+                status = Self.futureAnomalyStatus(next.updatedAt)
+                return
+            }
             if let previous = revisions[next.sourceInstanceId] {
                 guard next.revision >= previous.number else { throw RelationshipInboxError("拒绝旧同步版本回退（\(next.revision) < \(previous.number)）") }
                 guard next.revision != previous.number || next.digest == previous.digest else { throw RelationshipInboxError("同一同步版本的内容发生变化，请在关系回响重新同步") }
             }
             let changedSource = snapshot.map { $0.sourceInstanceId != next.sourceInstanceId } ?? false
+            let contentChanged = snapshot?.sourceInstanceId != next.sourceInstanceId
+                || snapshot?.revision != next.revision
+                || snapshot?.updatedAt != next.updatedAt
+                || snapshot?.contacts.map(\.contactId) != next.contacts.map(\.contactId)
             var nextRevisions = revisions
             nextRevisions[next.sourceInstanceId] = Revision(number: next.revision, digest: next.digest)
             // Never expose a snapshot or permit navigation until its high-water mark is durably saved.
             try commitHistory(nextRevisions)
             try RelationshipInboxFiles.write(JSONEncoder().encode(Cache(snapshot: next, revisions: nil, formatVersion: 2)), directory: appRoot, name: cacheName)
-            snapshot = next; revisions = nextRevisions; lastSignature = readSignature; isStale = false
+            setSnapshot(next); revisions = nextRevisions; lastSignature = readSignature; isStale = false
             if changedSource { sourceNotice = "来源已更新；微信定位别名按来源分别保存，请重新核对名单。" }
-            status = "已同步 \(next.contacts.count) 人 · 版本 \(next.revision) · \(next.updatedAt)"
+            status = Self.syncedStatus(next)
+            if !ifModifiedOnly || contentChanged { rosterEpoch += 1 }
         } catch {
+            // 与 ensureHistory 失败路径对齐：盖戳后落盘失败的拍要允许下一拍重读，
+            // 否则 lastSignature 停在最新指纹上，3 秒自动同步被一次瞬时 IO 失败永久楔死
+            lastSignature = nil
             isStale = true
             status = "同步失败，名单已过期：\(error.localizedDescription)"
+            if !ifModifiedOnly { rosterEpoch += 1 }
         }
     }
     static func acceptsWakeURL(_ url: URL) -> Bool {
@@ -371,7 +514,8 @@ final class RelationshipInbox: ObservableObject {
         refresh()
         guard !isStale, let snapshot, snapshot.sourceInstanceId == expectedSourceID,
               let contact = contacts.first(where: { $0.contactId == contactID }) else { throw RelationshipInboxError("同步名单已过期或联系人已撤销，请刷新后重新选择") }
-        isOpening = true; defer { isOpening = false }
+        isOpening = true; openingContactID = contactID
+        defer { isOpening = false; openingContactID = nil }
         let savedAlias = alias(for: contactID)
         return try await navigator.openRelationshipChat(savedAlias.isEmpty ? contact.name : savedAlias)
     }

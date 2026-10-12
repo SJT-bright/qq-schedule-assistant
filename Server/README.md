@@ -94,8 +94,8 @@ python3 server.py --host 0.0.0.0 --port 9000
 |---|---|---|
 | GET | `/` | 官网落地页 |
 | GET | `/admin` | 管理后台单页 |
-| GET | `/api/plans` | 档位列表 `[{id,name,days,price_fen,price_display,tagline}]` |
-| POST | `/api/register` | `{account,password}` → `{token,profile}`；注册送 3 天试用 |
+| GET | `/api/plans` | 档位列表 `[{id,name,days,price_fen,price_display,tagline}]`；响应头 `X-Trial-Days` 为当前有效试用天数 |
+| POST | `/api/register` | `{account,password}` → `{token,profile}`；试用天数按 `trial_days` 配置（缺省 3 天） |
 | POST | `/api/login` | `{account,password}` → `{token,profile}` |
 | POST | `/api/logout` | （Bearer）注销当前 token |
 | GET | `/api/me` | （Bearer）→ `{account,plan_label,paid_until,days_left,source:"trial|paid",...}`；token 滑动续期 |
@@ -105,12 +105,14 @@ python3 server.py --host 0.0.0.0 --port 9000
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/admin/overview` | 用户数 / 有效会员 / 试用中 / 累计收入(元) / 卡密未用·已用 |
+| POST | `/api/admin/logout` | 注销当前管理 token，其他管理会话保持有效 |
+| GET | `/api/admin/overview` | 用户数 / 有效会员 / 试用中 / 累计收入(元) / 卡密未用·已用；有效会员与试用中均排除禁用账号 |
 | GET | `/api/admin/users?q=` | 用户列表（支持账号搜索） |
 | POST | `/api/admin/users/grant` | `{user_id,days,note}` 客服补单直接加时长 |
 | POST | `/api/admin/users/disable` | `{user_id,disabled}` 禁用 / 恢复账号 |
 | POST | `/api/admin/codes/generate` | `{plan_id,count(1-500),note}` 批量生成卡密，返回码列表 |
-| GET | `/api/admin/codes?status=&q=` | 卡密列表（可按状态 / 卡密筛选） |
+| GET | `/api/admin/codes?status=&q=` | 卡密列表（状态为 `unused` / `used` / `void`，可按卡密筛选；非法非空状态返回 `400 INVALID_STATUS`，导出同样校验） |
+| POST | `/api/admin/codes/void` | `{code}` 作废未使用卡密；重复作废返回 `409 CODE_VOID`，已使用返回 `409 CODE_USED` |
 | GET | `/api/admin/codes/export?status=&q=` | 卡密 CSV 导出（带 BOM，Excel 直接打开） |
 | GET | `/api/admin/redemptions` | 兑换记录（谁 / 哪张码 / 哪个档 / 时间 / 金额） |
 
